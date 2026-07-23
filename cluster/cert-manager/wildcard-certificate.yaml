@@ -1,0 +1,20 @@
+# The ONE certificate for the whole fleet: apex + every subdomain. Lives in
+# the `platform` namespace; Traefik serves it as the default via the TLSStore
+# (cluster/traefik/tlsstore-default.yaml), so app Ingresses need no per-host
+# tls: block and no cert-manager annotation — any Host under lans-h.cc gets
+# valid TLS automatically, including unrouted names (clean 404, no cert
+# warning). Renewal is automatic (cert-manager, ~30 days before expiry).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lans-h-cc
+  namespace: platform
+spec:
+  secretName: lans-h-cc-tls
+  issuerRef:
+    name: letsencrypt-dns01
+    kind: ClusterIssuer
+  commonName: lans-h.cc
+  dnsNames:
+    - lans-h.cc
+    - "*.lans-h.cc"   # one level only; covers gelp/, transigen/, www/, future apps

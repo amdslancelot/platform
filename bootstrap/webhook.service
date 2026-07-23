@@ -1,0 +1,14 @@
+[Unit]
+Description=adnanh/webhook listener for fleet push-to-deploy (platform-owned)
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/webhook -hooks /etc/webhook/hooks.json -port 9000 -verbose
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

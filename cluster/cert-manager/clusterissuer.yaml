@@ -1,0 +1,28 @@
+# Let's Encrypt via DNS-01 against Cloudflare (lans-h.cc's DNS is delegated to
+# Cloudflare; registration stays at Spaceship). DNS-01 is what allows the
+# wildcard certificate — HTTP-01 cannot issue wildcards.
+#
+# Requires Secret cloudflare-api-token in the cert-manager namespace (a
+# ClusterIssuer reads solver secrets from there, NOT from the Certificate's
+# namespace). Token scope: Zone→DNS→Edit + Zone→Zone→Read, zone lans-h.cc only.
+#
+# Named `letsencrypt-dns01` — deliberately NOT `letsencrypt-prod`, which is the
+# HTTP-01 issuer gelp's deploy.sh still applies on every deploy. The two can
+# coexist during migration; gelp's copy is retired in the app-onboarding step
+# (docs/runbook.md).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns01
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: lansoulot@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-dns01-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

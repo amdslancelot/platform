@@ -1,0 +1,35 @@
+# www.lans-h.cc → lans-h.cc, done at the ingress layer instead of Cloudflare.
+# Why: our DNS records are grey-cloud (DNS only) so cert-manager DNS-01 and
+# Traefik-terminated TLS work cleanly — but that means Cloudflare never sees
+# the traffic, so its Redirect/Page Rules can't fire ("This rule may not apply
+# to your traffic"). The redirect therefore lives here, in git, with the rest
+# of the platform. www resolves via the `*` wildcard A record and is covered
+# by the wildcard cert; this route 301s it before any backend is consulted.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: www-to-apex
+  namespace: platform
+spec:
+  redirectRegex:
+    regex: "^https?://www\\.lans-h\\.cc/(.*)"
+    replacement: "https://lans-h.cc/${1}"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: www-redirect
+  namespace: platform
+spec:
+  entryPoints: [web, websecure]
+  routes:
+    - kind: Rule
+      match: Host(`www.lans-h.cc`)
+      middlewares:
+        - name: www-to-apex
+      services:
+        # Never reached — the middleware redirects first. noop@internal is
+        # Traefik's built-in sink service for exactly this pattern.
+        - name: noop@internal
+          kind: TraefikService

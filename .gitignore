@@ -1,0 +1,7 @@
+# Secrets never enter git: DB roster passwords, webhook secrets, API tokens.
+secrets.env
+*.token
+.env*
+!.env.example
+
+.DS_Store

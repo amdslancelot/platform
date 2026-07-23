@@ -1,0 +1,17 @@
+# Make the wildcard cert Traefik's DEFAULT certificate. Any HTTPS request —
+# for any Host, routed or not — is served with *.lans-h.cc / lans-h.cc instead
+# of Traefik's self-signed placeholder. This is what lets app Ingresses drop
+# their tls: blocks entirely, and gives unrouted subdomains a clean 404 with
+# valid TLS.
+#
+# Traefik allows exactly one TLSStore named `default` cluster-wide. It must
+# live in the same namespace as the certificate Secret it references — hence
+# `platform`, next to lans-h-cc-tls (created by the wildcard Certificate).
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  namespace: platform
+spec:
+  defaultCertificate:
+    secretName: lans-h-cc-tls
