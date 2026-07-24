@@ -4,4 +4,7 @@ secrets.env
 .env*
 !.env.example
 
+# Personal working notes stay out of git (user's global convention).
+worklog.md
+
 .DS_Store
