@@ -86,8 +86,16 @@ if [ ! -f /etc/sudoers.d/k3s-ctr ]; then
 fi
 
 echo "==> Verifying Traefik is up (fleet needs 80/443)"
+# Traefik is deployed asynchronously by k3s's helm-controller after startup —
+# the Deployment object may not exist yet for the first ~minute, and `rollout
+# status` errors on NotFound instead of waiting. Wait for it to appear first.
+for i in $(seq 1 36); do
+  /usr/local/bin/k3s kubectl -n kube-system get deployment traefik >/dev/null 2>&1 && break
+  echo "    waiting for helm-controller to create the traefik deployment (${i}/36)..."
+  sleep 5
+done
 /usr/local/bin/k3s kubectl -n kube-system rollout status deployment/traefik --timeout=180s || \
-  echo "WARNING: Traefik not Available yet — check: kubectl -n kube-system get pods"
+  echo "WARNING: Traefik not Available — check: kubectl -n kube-system get pods,jobs"
 
 cat <<'EOF'
 
