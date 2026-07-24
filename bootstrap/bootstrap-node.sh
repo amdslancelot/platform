@@ -77,7 +77,10 @@ done
 
 mkdir -p /root/.kube
 ln -sf /etc/rancher/k3s/k3s.yaml /root/.kube/config
-chmod 600 /etc/rancher/k3s/k3s.yaml
+# Do NOT chmod the kubeconfig here. --write-kubeconfig-mode 644 above is a
+# deliberate fleet decision: the non-root SSH user (opc) runs bare kubectl and
+# snoopy's CI depends on it. (gelp's original setup-server.sh chmod 600'd it —
+# that root-only design does not apply to this node.)
 
 # Non-interactive `sudo k3s ctr images import` for snoopy's CI (SSH deploy):
 if [ ! -f /etc/sudoers.d/k3s-ctr ]; then
