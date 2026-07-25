@@ -120,6 +120,14 @@ Per app, in its own repo, now that platform provides the ground:
   (its DB may already exist — the ROTATE guard makes re-running safe); host →
   `transigen.lans-h.cc`; setup-app.sh keeps only repo-clone + deploy.env +
   env.prod; its provision-db.sh and hook-append are superseded by platform.
+- **GitHub webhook Payload URL** — use the DNS name, not the raw IP:
+  `http://deploy.lans-h.cc:9000/hooks/deploy-gelp` (gelp) and
+  `http://deploy.lans-h.cc:9000/hooks/deploy-transigen` (transigen). No new
+  Cloudflare record needed — `deploy.lans-h.cc` already resolves via the
+  existing `*.lans-h.cc` wildcard. Stays `http://`, not `https://`: `:9000`
+  is not behind Traefik/TLS. Hook ids in `webhook/hooks.json` are
+  `deploy-<app>` uniformly (gelp used to be bare `deploy`, renamed for
+  consistency before any real GitHub webhook pointed at it).
 - **my_website** — Ingress host `lans-h.ai` → `lans-h.cc`; drop any `www` in
   favour of the platform redirect; its k8s manifests currently land in ns
   `default` (works; `web` ns move is optional cleanup); DEPLOY.md's
@@ -132,9 +140,13 @@ Per app, in its own repo, now that platform provides the ground:
 *各 app 在自己的 repo 裡上車:gelp/transigen 把 Ingress host 換成正式子網域、
 刪掉自己的 clusterissuer / tls patch / cert-manager 註解(wildcard 預設憑證已
 涵蓋)、deploy 腳本裡的 cert-manager 安裝與 hooks 步驟改由 platform 負責;DB
-用 platform 的 provision-db.sh 開通(ROTATE guard 保證重跑安全)。my_website
-把 host 從 lans-h.ai 換成 lans-h.cc,注意節點用 podman 不是 docker,poll.sh
-要跟著調。snoopy 什麼都不用做。*
+用 platform 的 provision-db.sh 開通(ROTATE guard 保證重跑安全)。GitHub
+webhook 的 Payload URL 用網域名稱 `deploy.lans-h.cc:9000/hooks/deploy-<app>`
+而非裸 IP,靠既有的 `*.lans-h.cc` wildcard 就能解析,不用加新 DNS 記錄;仍是
+`http://` 不是 `https://`(:9000 沒走 Traefik/TLS)。hook id 統一成
+`deploy-<app>`(gelp 原本是裸的 `deploy`,趁還沒接上真的 GitHub webhook 先
+改掉)。my_website 把 host 從 lans-h.ai 換成 lans-h.cc,注意節點用 podman 不
+是 docker,poll.sh 要跟著調。snoopy 什麼都不用做。*
 
 ## Gate 7 — retire the moved copies
 

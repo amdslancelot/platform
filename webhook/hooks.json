@@ -1,6 +1,6 @@
 [
   {
-    "id": "deploy",
+    "id": "deploy-gelp",
     "execute-command": "/opt/gelp/deploy/deploy.sh",
     "command-working-directory": "/opt/gelp",
     "response-message": "Deploy triggered.",

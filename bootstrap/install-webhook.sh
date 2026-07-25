@@ -64,4 +64,4 @@ fi
 systemctl enable --now webhook.service
 [ "${changed}" -ne 0 ] && systemctl restart webhook.service
 
-echo "==> webhook listener ready on :9000 (hooks: deploy, deploy-transigen)"
+echo "==> webhook listener ready on :9000 (hooks: deploy-gelp, deploy-transigen)"
