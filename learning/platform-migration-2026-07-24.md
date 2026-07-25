@@ -270,6 +270,31 @@ provision its DB via `PROVISION_APPS="gelp"`, point its Ingress at
 the platform wildcard now covers it, register the GitHub webhook with
 `GELP_WEBHOOK_SECRET`).
 
+### Follow-up (same day) — hook-id consistency fix
+
+Before gelp's real GitHub webhook existed, caught that its hook id was bare
+`deploy` (a leftover from when it was the only app) while transigen's was
+`deploy-transigen` — inconsistent. Renamed to `deploy-gelp` in
+`webhook/hooks.json` (commit `a0463d3`), re-ran `install-webhook.sh` on the
+node, verified externally: `/hooks/deploy-gelp` → 200 + rules-not-satisfied,
+`/hooks/deploy` → 404 (gone), `/hooks/deploy-transigen` → unaffected. Also
+gelp's own `deploy/deploy.sh` + prod overlay were cleaned up (dropped the
+per-app cert-manager install and ClusterIssuer, since platform now owns TLS
+for the whole node; host hardcoded to `gelp.lans-h.cc`) — pending commit in
+the gelp repo. GitHub webhook Payload URL convention going forward: DNS name,
+not IP — `http://deploy.lans-h.cc:9000/hooks/deploy-<app>` (the existing
+`*.lans-h.cc` wildcard already resolves it, no new Cloudflare record needed).
+
+*同一天的後續修正 —— hook id 一致性:趁 gelp 還沒接上真的 GitHub webhook,
+發現它的 hook id 是裸的 `deploy`(舊時唯一 app 留下的),跟 transigen 的
+`deploy-transigen` 不一致。改成 `deploy-gelp`(commit `a0463d3`),節點重跑
+install-webhook.sh,外網驗證:新路徑通、舊路徑 404、transigen 路徑不受影響。
+順便清了 gelp 自己的 `deploy/deploy.sh` 跟 prod overlay(拿掉自己的
+cert-manager 安裝跟 ClusterIssuer,host 寫死 `gelp.lans-h.cc`)——gelp repo
+那邊還沒 commit。以後 GitHub webhook Payload URL 一律用網域名稱不用 IP:
+`http://deploy.lans-h.cc:9000/hooks/deploy-<app>`,靠既有 wildcard 解析,
+不用加新 Cloudflare 記錄。*
+
 *下一步:**Gate 6** —— app 上車,gelp 先。clone 進 `/opt/gelp`、用
 `PROVISION_APPS="gelp"` 開通它的 DB、Ingress 指到 `gelp.lans-h.cc`、拔掉它
 自己的 clusterissuer/cert-manager 註記(平台的 wildcard 已經涵蓋)、用
