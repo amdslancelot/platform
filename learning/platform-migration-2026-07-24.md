@@ -17,7 +17,7 @@ problem hit and how it was solved. Updated continuously until the migration
 | 2 | OCI security list 開 80/443/9000 | ✅ | 2026-07-24 |
 | 3 | Postgres no-op 擁有權交接 | ✅ | 2026-07-24 |
 | 4 | TLS 全鏈(cert-manager → Cloudflare DNS-01 → wildcard → Traefik 預設憑證) | ✅ | 2026-07-24 ~08:0x |
-| 5 | webhook listener (:9000) | ⬜ | — |
+| 5 | webhook listener (:9000) | ✅ | 2026-07-25 07:11 |
 | 6 | app 上車(gelp → transigen → my_website) | ⬜ | — |
 | 7 | 清理各 app repo 舊副本 | ⬜ | — |
 
@@ -25,8 +25,9 @@ problem hit and how it was solved. Updated continuously until the migration
 - [ ] Cloudflare API token 曾在對話中以明文出現 → 全部完成後去 Cloudflare **Roll**
       一把新值並更新 `cloudflare-api-token` Secret。
 - [ ] Cloudflare 殘留的 `_acme-challenge` TXT 記錄順手清掉(無害,純衛生)。
-- [ ] Gate 5 需產生 `GELP_WEBHOOK_SECRET` / `TRANSIGEN_WEBHOOK_SECRET` 並存入密碼
-      管理器(Gate 6 在 GitHub 設 webhook 要用同一把)。
+- [x] Gate 5 需產生 `GELP_WEBHOOK_SECRET` / `TRANSIGEN_WEBHOOK_SECRET` 並存入密碼
+      管理器(Gate 6 在 GitHub 設 webhook 要用同一把)——密碼已由使用者存放,
+      同一把值 Gate 6 設定 GitHub webhook 時要重用。
 
 ---
 
@@ -219,3 +220,57 @@ TRANSIGEN_WEBHOOK_SECRET=... bash bootstrap/install-webhook.sh`, verify
 
 *下次從 **Gate 5** 接手:產生兩把 webhook secret(存密碼管理器)→ 跑
 install-webhook.sh → 本機+外網驗證 :9000 → 進 Gate 6 app 上車(gelp 先)。*
+
+---
+
+## 2026-07-25 — Day 2: Gate 5
+
+```bash
+sudo GELP_WEBHOOK_SECRET="$GELP_WH" TRANSIGEN_WEBHOOK_SECRET="$TRAN_WH" \
+  bash bootstrap/install-webhook.sh
+```
+
+```
+==> Installing adnanh/webhook 2.8.3
+==> Rendering /etc/webhook/hooks.json from .../webhook/hooks.json
+Created symlink .../webhook.service → ...
+==> webhook listener ready on :9000 (hooks: deploy, deploy-transigen)
+```
+
+`systemctl status webhook` → active (running), enabled. Local check:
+
+```
+$ curl -s http://localhost:9000/hooks/deploy
+Hook rules were not satisfied.
+```
+
+External check (from the Mac):
+
+```
+$ curl -s -o /dev/null -w "HTTP %{http_code}\n" http://92.5.135.46:9000/hooks/deploy   → HTTP 200
+$ curl -s http://92.5.135.46:9000/hooks/deploy                                          → Hook rules were not satisfied.
+```
+
+"Hook rules were not satisfied" is the CORRECT response for a request with no
+valid HMAC signature — it proves the listener is up and evaluating rules, not
+just reachable. Full path verified: internet → OCI security list :9000 →
+servicelb → webhook daemon. No problems this gate. Secrets were exported only
+into the sudo env var for the one command, then `unset` immediately after —
+never written to shell history or disk.
+
+*「Hook rules were not satisfied」是沒帶正確 HMAC 簽章時的正確回應——證明
+listener 不只是「打得通」,而是真的有在跑規則判斷。全路徑已驗證:外網 → OCI
+security list :9000 → servicelb → webhook daemon。這個 Gate 沒有遇到問題。
+secret 只在單一指令的 sudo 環境變數內短暫存在,指令結束立刻 `unset`,沒有
+落地到 shell history 或磁碟。*
+
+Next: **Gate 6** — app onboarding, gelp first (clone into `/opt/gelp`,
+provision its DB via `PROVISION_APPS="gelp"`, point its Ingress at
+`gelp.lans-h.cc`, drop its own clusterissuer/cert-manager annotations since
+the platform wildcard now covers it, register the GitHub webhook with
+`GELP_WEBHOOK_SECRET`).
+
+*下一步:**Gate 6** —— app 上車,gelp 先。clone 進 `/opt/gelp`、用
+`PROVISION_APPS="gelp"` 開通它的 DB、Ingress 指到 `gelp.lans-h.cc`、拔掉它
+自己的 clusterissuer/cert-manager 註記(平台的 wildcard 已經涵蓋)、用
+`GELP_WEBHOOK_SECRET` 在 GitHub 設定 webhook。*
