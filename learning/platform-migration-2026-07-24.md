@@ -28,6 +28,15 @@ problem hit and how it was solved. Updated continuously until the migration
 - [x] Gate 5 需產生 `GELP_WEBHOOK_SECRET` / `TRANSIGEN_WEBHOOK_SECRET` 並存入密碼
       管理器(Gate 6 在 GitHub 設 webhook 要用同一把)——密碼已由使用者存放,
       同一把值 Gate 6 設定 GitHub webhook 時要重用。
+- [ ] **git push 三個 repo**(本機都領先 origin,節點手動 pull,不 push 節點永遠拿
+      不到):`platform` main(`1b6d554`/`a0463d3`/`bce70aa`)、`gelp` main
+      (`7fa375f`)、`transigen` main(`c3319b68`)。
+- [ ] Gate 6 尚未真的執行:gelp/transigen 都還沒 clone 進節點的 `/opt/`、DB 還沒
+      provision、`.env.prod`/`env.prod` 還沒建立。GitHub webhook 已經設定好了
+      (指向 `deploy.lans-h.cc:9000/hooks/deploy-gelp` /`-transigen`),但目前
+      `/opt/gelp`、`/opt/transigen` 都不存在——如果現在有人 push 到任一 repo 的
+      main,webhook 會觸發但 `deploy.sh` 找不到工作目錄會直接失敗(無害,只是
+      CI 跑失敗,不會弄壞任何東西)。
 
 ---
 
@@ -299,3 +308,103 @@ cert-manager 安裝跟 ClusterIssuer,host 寫死 `gelp.lans-h.cc`)——gelp rep
 `PROVISION_APPS="gelp"` 開通它的 DB、Ingress 指到 `gelp.lans-h.cc`、拔掉它
 自己的 clusterissuer/cert-manager 註記(平台的 wildcard 已經涵蓋)、用
 `GELP_WEBHOOK_SECRET` 在 GitHub 設定 webhook。*
+
+---
+
+## 2026-07-25 — Day 2 continued: gelp/transigen deploy cleanup, GitHub webhooks live
+
+Extended the Gate-5 follow-up (hook-id rename) into a full cleanup pass on
+both app repos, then the user configured both GitHub webhooks for real.
+
+*把 Gate 5 後續(hook id 改名)延伸成兩個 app repo 的完整清理,使用者接著把
+兩邊的 GitHub webhook 都設定好了。*
+
+**transigen got the same treatment gelp already had:**
+`deploy/deploy.sh` dropped its `letsencrypt-prod` ClusterIssuer check (that
+issuer never existed on this fresh node — it was gelp's old per-host one) and
+its hard dependency on `TRANSIGEN_HOST`/`/opt/transigen/deploy.env` (kubectl
+already works via the platform bootstrap's `/root/.kube/config` symlink for
+root, which is who the webhook service runs as). Prod overlay: dropped the
+cert-manager annotation + `tls:` patch, host hardcoded to
+`transigen.lans-h.cc`. `env.prod.example`: baked in the literal host instead
+of a now-unused `${TRANSIGEN_HOST}` placeholder.
+
+*transigen 補做跟 gelp 一樣的手術:deploy.sh 拿掉 `letsencrypt-prod`
+ClusterIssuer 檢查(這台新節點上根本沒有這個 issuer)跟對
+`TRANSIGEN_HOST`/deploy.env 的硬依賴;overlay 拿掉 cert-manager 註記跟 tls
+patch,host 寫死;env.prod.example 的 host 佔位符也改成寫死。*
+
+**Branch-hygiene wrinkle:** the transigen repo was checked out on
+`webaudio-playback` (a local-only feature branch, no remote tracking,
+branched exactly at `main`'s tip) when the deploy commit landed there by
+accident. User wanted the deploy fix on `main` and `webaudio-playback` kept
+pure for feature work. Fixed with cherry-pick, not a rewrite of shared
+history (branch was never pushed, so this was safe):
+```
+git checkout main && git cherry-pick c60619a9        # → main gets c3319b68
+git checkout webaudio-playback && git reset --soft HEAD~1
+git restore --source=HEAD --staged --worktree -- deploy/deploy.sh \
+  deploy/env.prod.example deploy/k8s/overlays/prod/kustomization.yaml
+```
+The last `restore` step only touched the 3 deploy files, leaving the
+branch's real (uncommitted) audio-feature WIP completely untouched. Also
+caught mid-flow: transigen's working tree had a pile of unrelated in-progress
+audio-feature changes (`.gitignore`, `README.md`, several `src/` files,
+`worker/worker.py`, new `src/app/api/audio/` etc.) — staged and committed
+`deploy.sh`/`env.prod.example`/`kustomization.yaml` **by explicit filename
+only**, never `git add -A`, so none of that WIP got swept into the deploy
+commit.
+
+*transigen 那時 checkout 在本機專屬的 `webaudio-playback` feature branch 上
+(沒推遠端,從 main tip 分出來),deploy fix commit 不小心進了這個 branch。
+使用者要的是 fix 進 main、`webaudio-playback` 保持乾淨。用 cherry-pick 解決
+(branch 沒推過遠端,改寫安全):main 上 cherry-pick 拿到新 commit,
+`webaudio-playback` 用 soft reset 退回再單獨 restore 那三個 deploy 檔案,
+其餘 audio 功能的未 commit 更動完全沒被動到。過程中也注意到 transigen
+working tree 有一堆跟這次改動無關的 audio 功能開發中變更,commit 時是
+**明確指定檔名**,不是 `git add -A`,確保不會誤把別人的 WIP 一起 commit 進去。*
+
+**Tag-gate flip question raised, deliberately deferred again.** User asked
+"不是所有 repo 都要 tag 才觸發部署嗎?" — confirmed that's still the target
+end-state (snoopy already tag-gated; gelp/transigen are not yet), but
+explicitly chose to get gelp/transigen running on their current
+push-to-main trigger first (verify the whole path end-to-end on the new
+node), and do the tag-gate flip as a separate, later, deliberate step —
+consistent with the original decision recorded in `docs/runbook.md`'s
+"Deferred" section.
+
+*使用者問起 tag-gate 的事,確認這仍是目標架構(snoopy 已經是,gelp/transigen
+還不是),但明確選擇先讓 gelp/transigen 用現有的 push-to-main 觸發方式跑通
+整條路,tag-gate flip 留到之後再單獨處理——跟 runbook 裡「Deferred」那段原本
+的決定一致。*
+
+**GitHub webhooks configured on both repos (live).** Payload URLs use the
+DNS-name convention from the prior turn:
+`http://deploy.lans-h.cc:9000/hooks/deploy-gelp` and
+`http://deploy.lans-h.cc:9000/hooks/deploy-transigen`, still `refs/heads/main`
+gated (per the tag-gate deferral above). **Not yet safe to actually push**
+to either repo's main: `/opt/gelp` and `/opt/transigen` don't exist on the
+node yet, so a live push would fire the webhook and `deploy.sh` would fail
+on a missing working directory (harmless — just a failed CI run, nothing
+gets corrupted).
+
+*兩邊 GitHub webhook 都設定好了,Payload URL 用網域名稱、仍是 push-to-main
+觸發。但現在還不能真的 push 到任一邊的 main——節點上 `/opt/gelp`、
+`/opt/transigen` 都還沒 clone,webhook 觸發後 `deploy.sh` 會因為工作目錄不
+存在而失敗(無害,只是 CI 失敗,不會弄壞任何東西)。*
+
+### Day 2 stopping point / 今日收工點
+
+Three repos have local commits not yet pushed (`platform`, `gelp`,
+`transigen` — see the Outstanding checklist at the top). Gate 6 itself has
+not started executing: next session picks up with the actual app onboarding
+sequence per app — clone into `/opt/<app>`, provision its DB via
+`cluster/data-postgres/provision-db.sh`, write its `.env.prod`/`env.prod`,
+run `deploy/deploy.sh` by hand once to verify end-to-end before trusting the
+already-configured webhook, then confirm `https://gelp.lans-h.cc` /
+`https://transigen.lans-h.cc` serve with valid TLS.
+
+*三個 repo 都有本機 commit 還沒 push(見檔案最上面的 Outstanding 清單)。Gate 6
+本身還沒開始執行:下次從實際上車開始——clone 進 `/opt/<app>`、用
+provision-db.sh 開通 DB、寫 `.env.prod`/`env.prod`、手動跑一次 deploy.sh
+驗證整條路,再信任已經設定好的 webhook,最後確認兩個網域憑證有效、服務正常。*
