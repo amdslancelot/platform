@@ -20,7 +20,7 @@ told inline where they hit, with how they were solved.
 | 3 | Postgres no-op 擁有權交接 | ✅ | 2026-07-24 |
 | 4 | TLS 全鏈(cert-manager → Cloudflare DNS-01 → wildcard → Traefik 預設憑證) | ✅ | 2026-07-24 |
 | 5 | webhook listener (:9000) | ✅ | 2026-07-25 |
-| 6 | app 上車(gelp ✅ / transigen ✅ / my_website 🟡) | 🟡 | gelp+transigen done |
+| 6 | app 上車(gelp ✅ / transigen ✅ / my_website ✅) | ✅ | 2026-07-26 |
 | 7 | 清理各 app repo 舊副本 | ⬜ | — |
 
 ## Outstanding / 未結事項
@@ -29,8 +29,8 @@ told inline where they hit, with how they were solved.
 |---|---|
 | ☐ | Cloudflare API token 曾在對話明文出現 → 全部完成後 **Roll** 新值 + 更新 `cloudflare-api-token` Secret |
 | ☐ | 清掉 Cloudflare 殘留的 `_acme-challenge` TXT 記錄(純衛生) |
-| ☐ | **(明天)** my_website 收尾:先驗證 `curl -sI https://lans-h.cc`(pod 已 1/1 Running,但對外 200 + 憑證尚未確認) |
-| ☐ | **(明天)** my_website poll → webhook:產 `MY_WEBSITE_WEBHOOK_SECRET` → platform `webhook/hooks.json` 加 `deploy-my_website`(觸發 build)→ 停用 `deploy-poll.timer` → GitHub 設 webhook。理由:即時、省掉 poll(雖然 poll 流量本就可忽略),代價是多一把 secret + 一個入站 hook |
+| ✅ | my_website 對外驗證:`curl -sI https://lans-h.cc` → HTTP/2 200 + 有效憑證;首頁 HTML 為真 Astro build;`localhost/lans-h-site:latest` 在 containerd(2026-07-26) |
+| 🟡 | my_website poll → webhook:程式碼改動已完成(repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`)。**剩節點步驟**:產 secret → pull → 重跑 installer(帶三把 secret)→ 停 `deploy-poll.timer` → GitHub 設 webhook。見 Day 5 |
 | ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 |
 | ☐ | tag-gate flip:gelp/transigen 由 push-to-main 改為 `v*` tag(對齊 snoopy) |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
@@ -561,16 +561,19 @@ transigen TODO。*
 
 ---
 
-## Day 5 (2026-07-26) — Gate 6 my_website 上車(進行中)
+## Day 5 (2026-07-26) — Gate 6 my_website 上車 + poll→webhook
 
 Last app, and a different shape: a static Astro→nginx site at the apex
-`lans-h.cc`, deployed by a **git-poll systemd timer** (not a webhook), from a
-private repo. The local clone had no GitHub remote and was on `master`, so this
-one also needed a GitHub repo created and a branch rename first.
+`lans-h.cc`, from a private repo. The local clone had no GitHub remote and was on
+`master`, so this one also needed a GitHub repo created and a branch rename
+first. It was onboarded first on a **git-poll systemd timer**, verified live,
+then switched to the **shared webhook listener** (steps 5–6) so every push-driven
+app uses one mechanism.
 
-*最後一個 app,形狀不同:靜態 Astro→nginx 站,掛在 apex `lans-h.cc`,由 **git-poll
-systemd timer**(不是 webhook)部署,來自一個 private repo。本機這份還沒有 GitHub
-remote、分支是 `master`,所以這個還得先建 GitHub repo、改分支名。*
+*最後一個 app,形狀不同:靜態 Astro→nginx 站,掛在 apex `lans-h.cc`,來自一個
+private repo。本機這份還沒有 GitHub remote、分支是 `master`,所以這個還得先建 GitHub
+repo、改分支名。先用 **git-poll systemd timer** 上車、驗證上線,再改接 **共用 webhook
+listener**(步驟 5–6),讓所有 push 觸發的 app 共用同一套機制。*
 
 **1. Mac —— 調整成平台相容,然後推上 GitHub。**
 
@@ -651,27 +654,111 @@ cd ~/Documents/claude/my_website && git push origin main   # origin/main → 1ff
 sudo /opt/my_website/deploy/poll.sh   # podman build(Astro→nginx)→ import localhost/lans-h-site → kubectl rollout
 ```
 
-Expect the run to now print `New commit …, deploying…`, then the podman build, an
-image import as `localhost/lans-h-site:latest`, and a successful rollout. This is
-the first real test of my_website's `poll.sh` against the gelp traps (PATH / image
-name) — all pre-fixed, but only a real run confirms it. **(進行到這裡 / current
-position.)**
+The run printed `New commit …, deploying…`, then the podman build, an image
+import as `localhost/lans-h-site:latest`, and a successful rollout — clearing the
+gelp traps (PATH / image name) on the first real run.
 
-*期望這次會印出 `New commit …, deploying…`,接著 podman build、映像以
-`localhost/lans-h-site:latest` import、rollout 成功。這是第一次真的驗證 my_website 的
-`poll.sh` 有沒有踩 gelp 那些坑(PATH / image 命名)——都先修好了,但要實跑才算數。
-**目前進行到這一步。***
+*這次印出了 `New commit …, deploying…`,接著 podman build、映像以
+`localhost/lans-h-site:latest` import、rollout 成功——第一次實跑就避開了 gelp 那些坑
+(PATH / image 命名)。*
 
-**4. 驗證(待做):**
+**4. 驗證 —— 對外 200 + 憑證 + containerd 映像。**
 
 ```bash
-kubectl rollout status deployment/lans-h-site   # 期望 successfully rolled out(opc,不用 sudo)
-curl -sI https://lans-h.cc | head -1            # 期望 HTTP/2 200 + 有效 TLS(平台 wildcard 自動涵蓋 apex)
-# 確認 Cloudflare apex A 記錄:lans-h.cc → 92.5.135.46(灰雲)
+kubectl rollout status deployment/lans-h-site   # successfully rolled out(opc,不用 sudo)
+curl -sI https://lans-h.cc                       # HTTP/2 200,server: nginx(Traefik 透傳後端 header)
+curl -s https://lans-h.cc | head                 # 真的 Astro 首頁(<title>lans-h、intro、projects)
+sudo /usr/local/bin/k3s ctr images ls | grep lans-h-site   # localhost/lans-h-site:latest,60.2 MiB,arm64
 ```
 
-Expect `200` with a valid cert at the apex → my_website LIVE and Gate 6 complete.
-*apex 拿到 200 且憑證有效 → my_website 上線,Gate 6 完成。*
+Got `HTTP/2 200` with a valid apex cert, the real Astro homepage, and the image
+present in containerd → my_website LIVE. Gate 6 done (all three apps up).
+*apex 拿到 200 + 有效憑證 + 真首頁 + containerd 有映像 → my_website 上線,Gate 6 完成
+(三個 app 全上)。*
+
+**5. Mac —— poll → webhook 的程式碼改動。**
+
+The poll timer works, but it's a second deploy mechanism to reason about. gelp
+and transigen already push-to-deploy via the shared `adnanh/webhook` listener on
+`:9000`, so fold my_website into it too. Webhook side (platform repo): add a
+`deploy-my_website` hook to the ONE template and teach `install-webhook.sh` the
+new secret. App side (my_website repo): add `deploy/deploy.sh` (same build/import/
+rollout as poll.sh, minus the HEAD-vs-origin compare — a webhook already means a
+new commit), retire the three poll units.
+
+*poll timer 能動,但它是第二套要維護的部署機制。gelp/transigen 早就用 `:9000` 上的
+共用 `adnanh/webhook` push-to-deploy,把 my_website 也併進去。Webhook 端(platform
+repo):在唯一模板加 `deploy-my_website` hook,並讓 `install-webhook.sh` 認得新
+secret。App 端(my_website repo):加 `deploy/deploy.sh`(build/import/rollout 跟
+poll.sh 一樣,但拿掉 HEAD 對 origin 的比對——webhook 本身就代表有新 commit),退掉三個
+poll unit。*
+
+```bash
+# platform repo
+cd ~/Documents/claude/platform
+#  webhook/hooks.json         → 加第三個 hook deploy-my_website(HMAC {{MY_WEBSITE_WEBHOOK_SECRET}} + ref=main)
+#  bootstrap/install-webhook.sh → 必填 var 迴圈 / export / jq walk / 完成訊息都加 MY_WEBSITE_WEBHOOK_SECRET
+#  README.md、docs/runbook.md   → my_website 那列 poll → webhook,Gate 5 usage 加第三把 secret
+git add webhook/hooks.json bootstrap/install-webhook.sh README.md docs/runbook.md learning/
+git commit -m "webhook: add deploy-my_website hook; switch my_website off git-poll"
+
+# my_website repo
+cd ~/Documents/claude/my_website
+#  deploy/deploy.sh 新增(webhook 版,可執行);刪 poll.sh + deploy-poll.{service,timer};DEPLOY.md 改 webhook 流程
+git add -A
+git commit -m "deploy: switch from git-poll to shared platform webhook"
+git push origin main            # 觸發最後一次 poll 部署(timer 這時還在);之後才停 timer
+```
+
+**問題 9 / Problem:** `install-webhook.sh` renders `/etc/webhook/hooks.json`
+*wholesale* from the template — every `{{...}}` it references must be supplied on
+each run. Re-running with only the new secret would fail the required-vars check
+(and drop gelp/transigen). **解法 / Fix:** pass **all three** secrets when
+re-running (they were saved from Gate 5); the jq walk substitutes each in place.
+
+*問題 9:`install-webhook.sh` 是整份渲染,模板引用的每個 `{{...}}` 都得在該次執行提供;
+只帶新 secret 會過不了必填檢查(還會弄掉 gelp/transigen)。解法:重跑時帶齊三把 secret
+(Gate 5 存下來的),jq walk 會逐一代入。*
+
+**6. Node —— pull、重跑 installer、退掉 poll timer、GitHub 設 webhook。**
+
+```bash
+# node — 先把新的 deploy.sh 拉到 /opt/my_website(webhook execute-command 指向它)
+sudo git -C /opt/my_website fetch --all
+sudo git -C /opt/my_website reset --hard origin/main       # 應含 deploy/deploy.sh,poll.sh 已消失
+sudo test -x /opt/my_website/deploy/deploy.sh && echo ok   # 確認可執行
+
+# node — platform checkout 也更新,拿到新的 hooks.json + installer
+sudo git -C /opt/platform pull --ff-only   # (路徑依你節點上的 platform checkout 而定)
+
+# node — 重跑 installer,帶齊三把 secret(整份重渲染 /etc/webhook/hooks.json 並 restart)
+sudo GELP_WEBHOOK_SECRET="$GELP_WH" \
+     TRANSIGEN_WEBHOOK_SECRET="$TRAN_WH" \
+     MY_WEBSITE_WEBHOOK_SECRET="$(openssl rand -hex 32)" \
+     bash /opt/platform/bootstrap/install-webhook.sh   # ← 記下這把新 secret,GitHub 端要用同一個
+systemctl status webhook                                # active (running);訊息列出 3 個 hook
+
+# node — 退掉舊的 poll 機制(webhook 接手後就多餘)
+sudo systemctl disable --now deploy-poll.timer
+sudo rm -f /etc/systemd/system/deploy-poll.{service,timer}
+sudo systemctl daemon-reload
+```
+
+Then wire GitHub → repo **my_website** → Settings → Webhooks → Add webhook:
+Payload URL `http://deploy.lans-h.cc:9000/hooks/deploy-my_website`, content type
+`application/json`, secret = the `MY_WEBSITE_WEBHOOK_SECRET` above, just the push
+event. Verify by pushing a trivial commit and watching `journalctl -u webhook -f`
+fire `deploy-my_website` → build → rollout.
+
+*接著到 GitHub 的 my_website repo → Settings → Webhooks → Add webhook:Payload URL
+`http://deploy.lans-h.cc:9000/hooks/deploy-my_website`、content type
+`application/json`、secret 用上面那把 `MY_WEBSITE_WEBHOOK_SECRET`、只勾 push。驗證:推
+一個瑣碎 commit,看 `journalctl -u webhook -f` 觸發 `deploy-my_website` → build →
+rollout。*
+
+Expect the push to deploy with no poll timer involved → my_website now shares the
+one webhook mechanism with gelp/transigen. *push 後不靠 poll 就部署 → my_website 與
+gelp/transigen 共用同一套 webhook。*
 
 ---
 

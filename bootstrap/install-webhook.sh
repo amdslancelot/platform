@@ -9,6 +9,7 @@
 #
 # Usage (as root, secrets via environment so they never hit argv/ps):
 #   sudo GELP_WEBHOOK_SECRET=... TRANSIGEN_WEBHOOK_SECRET=... \
+#        MY_WEBSITE_WEBHOOK_SECRET=... \
 #        bash install-webhook.sh
 #
 # Idempotent: unchanged config never bounces a listener that might be serving
@@ -20,10 +21,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="${SCRIPT_DIR}/../webhook/hooks.json"
 
-for var in GELP_WEBHOOK_SECRET TRANSIGEN_WEBHOOK_SECRET; do
+for var in GELP_WEBHOOK_SECRET TRANSIGEN_WEBHOOK_SECRET MY_WEBSITE_WEBHOOK_SECRET; do
   [ -n "${!var:-}" ] || { echo "ERROR: $var is not set." >&2; exit 1; }
 done
-export GELP_WEBHOOK_SECRET TRANSIGEN_WEBHOOK_SECRET
+export GELP_WEBHOOK_SECRET TRANSIGEN_WEBHOOK_SECRET MY_WEBSITE_WEBHOOK_SECRET
 
 # --- 1. Pinned webhook binary (linux-arm64) ----------------------------------
 WEBHOOK_VERSION="2.8.3"
@@ -47,6 +48,7 @@ changed=0
 jq 'walk(
       if . == "{{GELP_WEBHOOK_SECRET}}"      then env.GELP_WEBHOOK_SECRET
       elif . == "{{TRANSIGEN_WEBHOOK_SECRET}}" then env.TRANSIGEN_WEBHOOK_SECRET
+      elif . == "{{MY_WEBSITE_WEBHOOK_SECRET}}" then env.MY_WEBSITE_WEBHOOK_SECRET
       else . end)' "${TEMPLATE}" > /etc/webhook/hooks.json.new
 jq -e . /etc/webhook/hooks.json.new >/dev/null
 if ! cmp -s /etc/webhook/hooks.json.new /etc/webhook/hooks.json; then
@@ -64,4 +66,4 @@ fi
 systemctl enable --now webhook.service
 [ "${changed}" -ne 0 ] && systemctl restart webhook.service
 
-echo "==> webhook listener ready on :9000 (hooks: deploy-gelp, deploy-transigen)"
+echo "==> webhook listener ready on :9000 (hooks: deploy-gelp, deploy-transigen, deploy-my_website)"

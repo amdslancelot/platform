@@ -95,12 +95,16 @@ Certificate(等 READY)→ TLSStore → www redirect。驗證:對外 curl 任意�
 
 ```bash
 sudo GELP_WEBHOOK_SECRET=... TRANSIGEN_WEBHOOK_SECRET=... \
+     MY_WEBSITE_WEBHOOK_SECRET=... \
      bash bootstrap/install-webhook.sh
 ```
 
 This renders `/etc/webhook/hooks.json` wholesale from `webhook/hooks.json` —
 from now on that template is the only place hooks are defined; gelp's
 setup-server.sh steps 7-9 and transigen's setup-app.sh step 4 are superseded.
+The template must supply *every* secret it references, so re-running to add an
+app (e.g. `deploy-my_website`, added 2026-07-26) means passing all three
+secrets, not just the new one.
 
 *這一步把 `/etc/webhook/hooks.json` 整份從 `webhook/hooks.json` 渲染出來——
 從此 hooks 只定義在這份模板;gelp setup-server.sh 的 7-9 步和 transigen
@@ -132,9 +136,11 @@ Per app, in its own repo, now that platform provides the ground:
   favour of the platform redirect; its k8s manifests currently land in ns
   `default` (works; `web` ns move is optional cleanup); DEPLOY.md's
   docker+k3s install section is superseded by `bootstrap/bootstrap-node.sh`
-  (note: node uses podman — poll.sh's `docker build` needs the podman
-  equivalent, incl. `podman save --format docker-archive`); install its
-  poll.sh systemd timer as its repo documents.
+  (note: node uses podman — the build needs `podman save --format
+  docker-archive`). Onboarded 2026-07-26 first on a git-poll systemd timer,
+  then switched to the shared webhook listener (added a `deploy-my_website`
+  hook here + `deploy/deploy.sh` in its repo, retired the poll timer) so all
+  push-driven apps share one mechanism.
 - **snoopy** — nothing to do. Stays zero-inbound; SSH+tag CI unchanged.
 
 *各 app 在自己的 repo 裡上車:gelp/transigen 把 Ingress host 換成正式子網域、
@@ -146,7 +152,10 @@ webhook 的 Payload URL 用網域名稱 `deploy.lans-h.cc:9000/hooks/deploy-<app
 `http://` 不是 `https://`(:9000 沒走 Traefik/TLS)。hook id 統一成
 `deploy-<app>`(gelp 原本是裸的 `deploy`,趁還沒接上真的 GitHub webhook 先
 改掉)。my_website 把 host 從 lans-h.ai 換成 lans-h.cc,注意節點用 podman 不
-是 docker,poll.sh 要跟著調。snoopy 什麼都不用做。*
+是 docker(build 要 `podman save --format docker-archive`);2026-07-26 先用
+git-poll 上車,之後改接共用 webhook(這裡加 `deploy-my_website` hook、repo 裡加
+`deploy/deploy.sh`、退掉 poll timer),讓所有 push 觸發的 app 共用同一套機制。
+snoopy 什麼都不用做。*
 
 ## Gate 7 — retire the moved copies
 
