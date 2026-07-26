@@ -496,6 +496,257 @@ gelp's deploy script predated fixes transigen already had. The first manual
 `/import` 重傳 Takeout zip(自動歸給登入者),不做 pg_dump/改 UUID 的手術;結果
 70 清單 / 5469 地點全數 enrich。*
 
+### Command transcript / 指令實錄
+
+Verbatim, in execution order on the node (`opc@louis2`), Mac-side git ops
+noted where they interleave.
+
+**1. Clone as root fails — no GitHub key for root:**
+
+```
+$ sudo git clone --branch main git@github.com:amdslancelot/gelp.git /opt/gelp
+Cloning into '/opt/gelp'...
+The authenticity of host 'github.com (140.82.121.4)' can't be established.
+...
+git@github.com: Permission denied (publickey).
+fatal: Could not read from remote repository.
+```
+
+Fix — per-app read-only deploy key for root, then clone with it and pin it for
+future webhook pulls:
+
+```
+$ sudo ssh-keygen -t ed25519 -f /root/.ssh/gelp_deploy_key -N "" -C "louis2-gelp-deploy"
+$ sudo cat /root/.ssh/gelp_deploy_key.pub          # → add as a read-only Deploy key on the gelp repo
+$ sudo GIT_SSH_COMMAND="ssh -i /root/.ssh/gelp_deploy_key -o IdentitiesOnly=yes" \
+    git clone --branch main git@github.com:amdslancelot/gelp.git /opt/gelp
+$ sudo git -C /opt/gelp config core.sshCommand "ssh -i /root/.ssh/gelp_deploy_key -o IdentitiesOnly=yes"
+```
+
+**2. Provision the DB — role already existed (password NOT applied):**
+
+```
+$ kubectl -n data exec -i deploy/postgres -- \
+    env PROVISION_APPS="gelp" GELP_DB_PASSWORD="$GELP_DB_PASSWORD" \
+    bash -s < cluster/data-postgres/provision-db.sh
+REVOKE
+REVOKE
+exists: role 'gelp_rw' — password untouched (set ROTATE=1 to rotate)
+REVOKE
+GRANT
+provisioned: database 'gelp' owned by role 'gelp_rw'
+app provisioning complete: gelp
+```
+
+Re-run with `ROTATE=1` to set the password to the `.env.prod` (hex) value:
+
+```
+$ kubectl -n data exec -i deploy/postgres -- \
+    env PROVISION_APPS="gelp" ROTATE=1 GELP_DB_PASSWORD="$GELP_DB_PASSWORD" \
+    bash -s < cluster/data-postgres/provision-db.sh
+...
+ALTER ROLE
+rotated: password for existing role 'gelp_rw'
+...
+app provisioning complete: gelp
+```
+
+**3. First manual deploy — builds, then bug #1 (secure_path):**
+
+```
+$ cd /opt/gelp && sudo bash deploy/deploy.sh
+==> Deploying Gelp from /opt/gelp
+==> Pulling latest changes (git pull --ff-only)
+Already up to date.
+==> Building gelp:latest with podman
+[1/2] STEP 1/7: FROM node:22-alpine AS builder
+   ... (image build, npm ci, next build — succeeds) ...
+Successfully tagged localhost/gelp:latest
+==> Importing gelp:latest into k3s containerd
+deploy/deploy.sh: line 61: k3s: command not found
+```
+
+Fixed on the Mac (`export PATH="/usr/local/bin:$PATH"` at top of deploy.sh),
+commit `f002c33`, `git push` → webhook redeploy.
+
+**4. Pod won't start — bug #2 (image name → ImagePull):**
+
+```
+$ kubectl -n gelp logs deploy/gelp
+Found 2 pods, using pod/gelp-56d9ffd5c8-s2j6p
+Error from server (BadRequest): container "gelp" in pod "gelp-56d9ffd5c8-s2j6p" is waiting to start: trying and failing to pull image
+```
+
+Fixed on the Mac (prod overlay `newName: localhost/gelp`), commit `396fe8a`,
+`git push` → webhook redeploy.
+
+**5. Verify — bug #1 also bites the interactive command; use the full path:**
+
+```
+$ sudo k3s ctr images ls | grep gelp
+sudo: k3s: command not found
+$ sudo /usr/local/bin/k3s ctr images ls | grep gelp
+docker.io/library/gelp:latest   ...  sha256:aea61c5f...  214.4 MiB  linux/arm64  ...
+localhost/gelp:latest           ...  sha256:aea61c5f...  214.4 MiB  linux/arm64  ...
+
+$ kubectl -n gelp get pods
+NAME                    READY   STATUS    RESTARTS   AGE
+gelp-79c8dbfb86-bqlcg   1/1     Running   0          7m36s
+
+$ curl -sI https://gelp.lans-h.cc | head -1
+HTTP/2 302
+$ curl -sI https://gelp.lans-h.cc | grep -i location
+location: https://gelp.lans-h.cc/login
+
+$ sudo /usr/local/bin/k3s ctr images rm docker.io/library/gelp:latest   # prune the debug leftover
+docker.io/library/gelp:latest
+```
+
+**6. Data seed — Takeout re-upload via the app's `/import`, then verify in DB:**
+
+```
+$ kubectl -n data exec -i deploy/postgres -- \
+    psql -U postgres -d gelp -c "select id, email, google_sub from users;" \
+    -c "select count(*) as lists from lists;" -c "select count(*) as places from places;"
+                  id                  |        email        |      google_sub
+--------------------------------------+---------------------+-----------------------
+ ee55ef4e-0800-4af9-9a5f-66764d45ee9b | lansoulot@gmail.com | 108579144711269239719
+(1 row)
+ lists  = 0        # before upload
+ places = 0
+
+# ... upload the Takeout zip at https://gelp.lans-h.cc/import (logged in) ...
+
+$ kubectl -n data exec -i deploy/postgres -- psql -U postgres -d gelp \
+    -c "select count(*) from lists;"  -c "select count(*) from places;" \
+    -c "select count(*) from places where cache_key is not null;" \
+    -c "select count(*) from place_cache;"
+ lists         = 70
+ places        = 5469
+ enriched      = 5469     # every place resolved via Places API
+ cached_places = 5350     # place_cache dedupes identical real-world places
+```
+
+*節點上按執行順序的逐字實錄(Mac 端的 git 操作在對應處註明):(1) root clone
+失敗→per-app 唯讀 deploy key 修好;(2) provision 發現角色已存在、密碼沒套用→
+`ROTATE=1` 重跑;(3) 首次手動 deploy 建置成功但踩 secure_path(line 61 k3s not
+found);(4) pod ImagePull(image 命名);(5) 驗證時互動指令也踩同一坑,改用全路
+徑,pod Running、curl 302→/login、清掉 debug 殘留映像;(6) 用 app 的 `/import`
+重傳 Takeout,DB 驗證 70/5469/5469/5350。*
+
+### Concepts / questions raised (學到的觀念 · 問過的問題)
+
+Conceptual questions that came up while onboarding gelp, with the answer
+essence — kept because the *why* is the reusable part, and one of them (#9)
+directly drove a design decision.
+
+1. **Why does gelp's `postgres-shared-cluster` branch exist, and why is its
+   content already in `main`?** It was the feature branch for the
+   SQLite→Postgres + shared-cluster-deploy work. `main` fast-forwarded past its
+   tip (linear history, no merge commit), so the branch is now a stale bookmark
+   fully contained in `main` — safe to `git branch -d`.
+2. **Can `GELP_DB_PASSWORD` just be the value in `.env.prod`?** Yes — they
+   *must* be identical: `provision-db.sh` CREATEs the role with it, and
+   `.env.prod`'s `DATABASE_URL` authenticates as that role. Caveat: the URL
+   needs special chars **percent-encoded** while the provision env var takes the
+   **raw** value — so a special-char password has two different spellings and is
+   easy to mismatch. Using pure `hex` avoids the whole trap.
+3. **What are `AUTH_SECRET` / `CRON_SECRET` / `DRIVE_FOLDER_ID` for?**
+   `AUTH_SECRET` = Auth.js session/JWT signing key (leak ⇒ forge any user's
+   login). `CRON_SECRET` = bearer token guarding the nightly `/api/cron/import`
+   endpoint so only the CronJob can call it. `DRIVE_FOLDER_ID` = the Drive
+   folder id the nightly sync pulls the newest Takeout from (an id, not a
+   secret).
+4. **Why can't `AUTH_SECRET` reuse the dev/staging one?** It's a *symmetric*
+   key — whoever holds it can forge sessions, so its blast radius is every place
+   it exists. dev/staging is lower-protection (shared `.env`, screenshots,
+   backups); sharing means a dev leak forges **prod** sessions, and you lose
+   independent rotation. Same logic as the project's per-app secrets, applied
+   per-environment.
+5. **Isn't `DRIVE_FOLDER_ID` supposed to be per-user?** The main app *is*
+   multi-user (lists/places scoped to `session.user.id`; manual upload is
+   per-user and uses no `DRIVE_FOLDER_ID`). `DRIVE_FOLDER_ID` belongs only to
+   the headless nightly CronJob, which has no session → single service account +
+   single folder + `allowedEmails()[0]`. It's a single-tenant convenience
+   feature sitting *beside* multi-user login, not a gap in it. (I first
+   over-stated "gelp's import is single-user"; the user pushed back and I
+   corrected it — hence the new per-user-Drive-sync item in gelp's `TODO.md`.)
+6. **What is `AUTH_TRUST_HOST`, and which "host"?** The incoming request's
+   `Host` / `X-Forwarded-Host` header — the domain the client claims to be
+   reaching (`gelp.lans-h.cc`). Auth.js uses it to build absolute callback URLs
+   and, in production, distrusts it by default (host-header injection could
+   redirect the OAuth callback — with its token — to an attacker's domain).
+   Behind Traefik you set it `true` because the proxy, which *you* control,
+   overwrites that header.
+7. **Whose API key is `GOOGLE_MAPS_API_KEY`?** Not any end-user's — a
+   server-side API key created in *your* Google Cloud project, billed to you,
+   used by the server for every enrichment call regardless of who's logged in.
+   Distinct from the OAuth client (`AUTH_GOOGLE_*`, user identity) and the
+   service account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`, Drive).
+8. **Why `docker.io`?** It's the default registry in image-reference
+   normalization: a bare `gelp:latest` expands to `docker.io/library/gelp:latest`
+   (registry `docker.io`, namespace `library`, tag `latest`), and that's the
+   fully-qualified name containerd actually looks up.
+9. **"I don't want `docker.io/library/` — it feels misleading."** Correct — the
+   image is built locally and never comes from Docker Hub. This objection is
+   what drove the **final** fix: name the prod image `localhost/gelp` instead
+   (honest "local, no registry"; containerd treats `localhost` as the registry
+   host so it never normalizes to docker.io and never pulls), superseding the
+   docker.io/library retag (commit `396fe8a`).
+10. **Why isn't `/usr/local/bin` in the sudo environment?** It *is* on the PATH
+    for an interactive login and for systemd services — but `sudo` deliberately
+    replaces PATH with its own `secure_path` (a trusted minimal list) to prevent
+    PATH-injection privilege escalation, and on OL9 that list excludes
+    `/usr/local/bin` (FHS: locally-installed, not distro-managed). Hence the
+    full-path / PATH-prepend workarounds.
+11. **What does `-C` do (ssh-keygen)?** Sets the key's *comment* — a
+    human-readable label appended to the `.pub` (e.g. `louis2-gelp-deploy`) to
+    tell keys apart in GitHub's Deploy-keys list; no effect on security or
+    function.
+
+Earlier days' conceptual Q&A, recorded here for completeness: **k3s reinstall
+didn't disrupt Postgres/app** because the containerd-shim decouples running
+containers from the daemon lifecycle (kubelet reconciles, doesn't recreate);
+**the node runs SQLite, not etcd** (single-node k3s default; etcd is only for
+HA multi-server quorum and CPU is the binding resource here); **the `deploy` in
+`deploy.lans-h.cc` is semantically meaningless** (the `*.lans-h.cc` wildcard maps
+any label to the node IP — the label is human legibility only); **adnanh/webhook
+does not route by `Host` header** (one `:9000` listener, routing purely by URL
+path `/hooks/<id>`, so ids must be globally unique).
+
+*上車 gelp 過程中冒出的概念問題,記下答案精華——「為什麼」才是能重用的部分,
+其中 #9 還直接驅動了一個設計決定。*
+
+*(1) `postgres-shared-cluster` 是 SQLite→Postgres + 共用叢集部署的 feature
+branch,main 已 fast-forward 越過它、線性含入,所以它是能安全刪的過時書籤。
+(2) `GELP_DB_PASSWORD` 必須跟 `.env.prod` 一致(provision 建角色、URL 用它認
+證);特殊字元在 URL 要 percent-encode、給 provision 要原始值,兩種寫法容易對不
+上,用 hex 免煩惱。(3) `AUTH_SECRET`=Auth.js 簽 session 的鑰(外洩=偽造任何人
+登入)、`CRON_SECRET`=守夜間匯入端點的 bearer token、`DRIVE_FOLDER_ID`=夜間同
+步要抓的 Drive 資料夾 id(是 id 不是密鑰)。(4) `AUTH_SECRET` 是對稱鑰,爆炸半
+徑=它存在的所有地方,dev 那份保護弱,共用等於 dev 外洩就能偽造 prod session,
+還沒法獨立輪替。(5) 主 app 是多人的(lists/places 綁 session、手動上傳 per-user
+且不用 `DRIVE_FOLDER_ID`);`DRIVE_FOLDER_ID` 只屬於無 session 的夜間 CronJob,
+那是單租戶便利功能,不是多人登入的缺口(我一開始講太滿說「匯入是單人」,你反駁
+後修正,也因此在 TODO 加了 per-user Drive 同步的功能項)。(6) `AUTH_TRUST_HOST`
+的 host = 請求的 `Host`/`X-Forwarded-Host`(客戶端聲稱的網域);prod 預設不信任
+以防 host-header 注入把 OAuth 回呼導去惡意網域,在 Traefik 後面因為 header 是你
+自己的代理覆寫的所以設 true。(7) `GOOGLE_MAPS_API_KEY` 不是使用者的,是你
+Google Cloud 專案裡的 server 端 key,記你帳、所有 enrichment 共用,跟 OAuth
+client、service account 是三種不同東西。(8) `docker.io` 是映像名正規化的預設
+registry:裸 `gelp:latest`→`docker.io/library/gelp:latest`,那才是 containerd
+去找的全名。(9)「不想用 docker.io/library、覺得誤導」——對,本地映像根本不從
+Docker Hub 來;這個反對驅動了最終改用 `localhost/gelp` 的命名(誠實、containerd
+把 localhost 當 registry host 永不 pull),取代 docker.io retag。(10)
+`/usr/local/bin` 其實有在一般/systemd PATH 裡,是 sudo 刻意用自己的 secure_path
+(受信任精簡清單,防 PATH 注入提權)取代掉,OL9 那份剛好不含它。(11) ssh-keygen
+的 `-C` 是設 key 的 comment(給人看的標籤),不影響安全或功能。更早幾天的概念問
+答:k3s 重裝不影響 Postgres/app 是因為 containerd-shim 讓執行中容器與 daemon 生
+命週期解耦(kubelet 對帳而非重建);節點用 SQLite 非 etcd(單節點預設,etcd 只
+為多 server HA,而這裡 CPU 是瓶頸);`deploy.lans-h.cc` 的 `deploy` 語意上無意義
+(wildcard 把任何 label 都解到節點 IP,純為好認);adnanh/webhook 不看 Host
+header(單一 :9000 listener,只靠路徑 `/hooks/<id>` 路由,故 id 要全域唯一)。*
+
 ### Follow-ups / 待辦
 
 - Optional hardening: `shred -u /opt/gelp/.env.prod` (deploy.sh's "secret
