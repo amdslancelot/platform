@@ -29,7 +29,8 @@ told inline where they hit, with how they were solved.
 |---|---|
 | ☐ | Cloudflare API token 曾在對話明文出現 → 全部完成後 **Roll** 新值 + 更新 `cloudflare-api-token` Secret |
 | ☐ | 清掉 Cloudflare 殘留的 `_acme-challenge` TXT 記錄(純衛生) |
-| ☐ | Gate 6 my_website 收尾(首次 build → 驗證 `https://lans-h.cc`) |
+| ☐ | **(明天)** my_website 收尾:先驗證 `curl -sI https://lans-h.cc`(pod 已 1/1 Running,但對外 200 + 憑證尚未確認) |
+| ☐ | **(明天)** my_website poll → webhook:產 `MY_WEBSITE_WEBHOOK_SECRET` → platform `webhook/hooks.json` 加 `deploy-my_website`(觸發 build)→ 停用 `deploy-poll.timer` → GitHub 設 webhook。理由:即時、省掉 poll(雖然 poll 流量本就可忽略),代價是多一把 secret + 一個入站 hook |
 | ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 |
 | ☐ | tag-gate flip:gelp/transigen 由 push-to-main 改為 `v*` tag(對齊 snoopy) |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
