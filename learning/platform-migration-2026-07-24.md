@@ -18,7 +18,7 @@ problem hit and how it was solved. Updated continuously until the migration
 | 3 | Postgres no-op 擁有權交接 | ✅ | 2026-07-24 |
 | 4 | TLS 全鏈(cert-manager → Cloudflare DNS-01 → wildcard → Traefik 預設憑證) | ✅ | 2026-07-24 ~08:0x |
 | 5 | webhook listener (:9000) | ✅ | 2026-07-25 07:11 |
-| 6 | app 上車(gelp → transigen → my_website) | ⬜ | — |
+| 6 | app 上車(gelp ✅ / transigen ⬜ / my_website ⬜) | 🟡 | gelp 2026-07-25 |
 | 7 | 清理各 app repo 舊副本 | ⬜ | — |
 
 **Outstanding / 未結事項**
@@ -28,15 +28,18 @@ problem hit and how it was solved. Updated continuously until the migration
 - [x] Gate 5 需產生 `GELP_WEBHOOK_SECRET` / `TRANSIGEN_WEBHOOK_SECRET` 並存入密碼
       管理器(Gate 6 在 GitHub 設 webhook 要用同一把)——密碼已由使用者存放,
       同一把值 Gate 6 設定 GitHub webhook 時要重用。
-- [ ] **git push 三個 repo**(本機都領先 origin,節點手動 pull,不 push 節點永遠拿
-      不到):`platform` main(`1b6d554`/`a0463d3`/`bce70aa`)、`gelp` main
-      (`7fa375f`)、`transigen` main(`c3319b68`)。
-- [ ] Gate 6 尚未真的執行:gelp/transigen 都還沒 clone 進節點的 `/opt/`、DB 還沒
-      provision、`.env.prod`/`env.prod` 還沒建立。GitHub webhook 已經設定好了
-      (指向 `deploy.lans-h.cc:9000/hooks/deploy-gelp` /`-transigen`),但目前
-      `/opt/gelp`、`/opt/transigen` 都不存在——如果現在有人 push 到任一 repo 的
-      main,webhook 會觸發但 `deploy.sh` 找不到工作目錄會直接失敗(無害,只是
-      CI 跑失敗,不會弄壞任何東西)。
+- [x] **git push 三個 repo** — 2026-07-25 用 `git fetch` 逐一確認(非只看快取的
+      tracking ref):`platform` main(`c46e105c`)、`gelp` main(`7fa375f`)、
+      `transigen` main(`c3319b68`)三個都已經跟 `origin/main` 一致。
+- [x] **Gate 6 gelp** — LIVE at `https://gelp.lans-h.cc`(見 Day 3 段)。clone
+      進 `/opt/gelp`、`ROTATE=1` provision DB、寫 `.env.prod`、修掉三個 gelp 專屬
+      deploy.sh bug、Takeout 重傳 seed(70 清單 / 5469 地點全 enrich)。push
+      自動部署整條路已驗證。
+- [ ] **Gate 6 transigen / my_website** 還沒做。transigen 同套路(clone
+      `/opt/transigen`、provision DB 可能要 ROTATE、`env.prod`、deploy);記得每個
+      app 要 root 專屬的 GitHub deploy key(`/root/.ssh/<app>_deploy_key`,唯讀,
+      `core.sshCommand`)。
+- [ ] 可選加固:`shred -u /opt/gelp/.env.prod`(deploy.sh 首次部署後沒有它也能跑)。
 
 ---
 
@@ -408,3 +411,101 @@ already-configured webhook, then confirm `https://gelp.lans-h.cc` /
 本身還沒開始執行:下次從實際上車開始——clone 進 `/opt/<app>`、用
 provision-db.sh 開通 DB、寫 `.env.prod`/`env.prod`、手動跑一次 deploy.sh
 驗證整條路,再信任已經設定好的 webhook,最後確認兩個網域憑證有效、服務正常。*
+
+---
+
+## 2026-07-25 — Day 3: Gate 6 gelp onboarded (LIVE)
+
+gelp is live at `https://gelp.lans-h.cc` — valid wildcard TLS, pod Running
+1/1, 70 lists of real data, push-to-deploy proven end-to-end. Confirmed all
+three repos were already pushed (checked with a real `git fetch`, not just
+cached tracking refs; the Day-2 "unpushed" note was stale).
+
+*gelp 上線:憑證有效、pod 正常、70 個清單的真實資料都在、push 自動部署整條
+路跑通。三個 repo 先前其實都已 push(用 `git fetch` 實查確認,Day 2 記的
+「未 push」是過時的)。*
+
+### Onboarding sequence / 上車步驟
+
+- **Clone, not `setup-server.sh`.** Plain `git clone` into `/opt/gelp`. gelp's
+  old `deploy/setup-server.sh` is the from-zero node builder (installs k3s,
+  webhook.service) — running it now would collide with what the platform repo
+  already owns. It's Gate-7 retirement fodder.
+- **Root needs its own GitHub deploy key.** `sudo git clone` runs as root, and
+  root had no GitHub key → `Permission denied (publickey)`. Fix (per-app,
+  least-privilege, matching the project's per-app-secret style): generate
+  `/root/.ssh/gelp_deploy_key`, add the pubkey as a **read-only Deploy key** on
+  the gelp repo, clone with `GIT_SSH_COMMAND`, then pin it for future
+  webhook-triggered pulls with `git -C /opt/gelp config core.sshCommand`.
+- **DB provision — role already existed.** `provision-db.sh PROVISION_APPS=gelp`
+  reported `exists: role 'gelp_rw' — password untouched`. The prod `gelp_rw`
+  pre-existed, so the password we passed was NOT applied. Re-ran with
+  **`ROTATE=1`** to set it to the `.env.prod` value — safe because nothing was
+  using the prod role yet (staging is a separate minikube Postgres). Used a
+  fresh `openssl rand -hex 24` password to sidestep URL-encoding in
+  `DATABASE_URL`.
+
+*clone 不要用 setup-server.sh(那是從零建節點的舊腳本,會跟 platform 打
+架,是 Gate 7 要退休的);root 要自己的 GitHub deploy key(`sudo git` 以 root
+身分跑,root 沒 key → publickey denied,解法是 per-app read-only deploy key +
+`core.sshCommand`);DB provision 時發現 prod `gelp_rw` 角色早就存在,密碼沒被
+套用,要用 `ROTATE=1` 改成 `.env.prod` 的值(安全,prod 角色還沒人在用),密碼
+用純 hex 避開 `DATABASE_URL` 的 URL-encoding 坑。*
+
+### Three gelp-only `deploy.sh` bugs (all already fixed in transigen)
+
+gelp's deploy script predated fixes transigen already had. The first manual
+`sudo bash deploy/deploy.sh` surfaced them one by one:
+
+1. **`sudo` secure_path.** `deploy.sh: line 61: k3s: command not found`. k3s
+   installs into `/usr/local/bin`, which is on the PATH for an interactive
+   login and for the webhook's systemd service — but `sudo` replaces PATH with
+   its `secure_path` (`/sbin:/bin:/usr/sbin:/usr/bin` on OL9), which excludes
+   `/usr/local/bin`. So bare `k3s`/`kubectl` fail under `sudo bash deploy.sh`
+   (a webhook run is fine). Fix: `export PATH="/usr/local/bin:$PATH"` at the
+   top of deploy.sh (commit `f002c33`). Same trap hits interactive
+   `sudo k3s ctr ...` — use the full path `sudo /usr/local/bin/k3s`.
+2. **image name mismatch → ImagePull.** Pod stuck "trying and failing to pull
+   image". podman builds an unqualified tag as `localhost/gelp:latest`, but the
+   pod spec's bare `gelp:latest` is normalized by containerd to
+   `docker.io/library/gelp:latest` — not found locally → registry pull attempt
+   → fail. First fix retagged to `docker.io/library/gelp:latest` (what
+   transigen does), but that name is **misleading** for a locally-built image.
+   Final fix: name the prod image **`localhost/gelp`** via the prod overlay's
+   `images:` transformer (`newName: localhost/gelp`) — honest ("local, no
+   registry"; containerd treats `localhost` as the registry host and never
+   pulls) and needs no retag in deploy.sh (commit `396fe8a`). Staging untouched
+   (its minikube `image load` path tolerates the bare name).
+3. **data seed via Takeout re-upload, not pg_dump.** gelp's TODO planned a
+   `pg_dump` from a preserved `gelp-pgdata` podman volume + re-pointing every
+   `user_id` to a hardcoded UUID. That volume is gone and gelp was never really
+   on prod before, so instead: log in to prod, **re-upload the Google Takeout
+   zip** through the app's own `/import` flow, which auto-scopes the import to
+   the logged-in user (`session.user.id`). Zero DB surgery. Verified:
+   **70 lists / 5469 places / 5469 enriched / 5350 cached** — full Places-API
+   enrichment worked. (prod user UUID is `ee55ef4e-…`, ≠ the stale
+   `d79ce418-…` in the TODO.)
+
+*三個 gelp 專屬的 deploy.sh bug(transigen 早就修好、gelp 腳本比較舊沒有):
+(1) sudo 的 secure_path 不含 /usr/local/bin → 裸 `k3s`/`kubectl` 在
+`sudo bash` 下 command not found(webhook 走 systemd PATH 沒事),修法是腳本頂
+端 `export PATH`;手打 sudo 也要用全路徑。(2) podman build 出 `localhost/gelp`
+但 pod spec 的裸 `gelp:latest` 被 containerd 正規化成 `docker.io/library/…`→
+找不到→試著 registry pull 失敗;最終用 overlay 的 `newName: localhost/gelp`
+誠實命名(不用誤導的 docker.io/library retag)。(3) 資料 seed 改用 app 自己的
+`/import` 重傳 Takeout zip(自動歸給登入者),不做 pg_dump/改 UUID 的手術;結果
+70 清單 / 5469 地點全數 enrich。*
+
+### Follow-ups / 待辦
+
+- Optional hardening: `shred -u /opt/gelp/.env.prod` (deploy.sh's "secret
+  exists → leave as-is" branch runs fine without it after first deploy).
+- Next: **transigen** onboarding (same shape; its deploy.sh already handles
+  the image name — verify it also has the PATH fix), then **my_website**.
+- Cleanup leftover from the debug: the intermediate
+  `docker.io/library/gelp:latest` image was pruned from containerd
+  (`k3s ctr images rm`).
+
+*可選加固:shred 掉 `.env.prod`;下一步 transigen(同套路,它 deploy.sh 已處理
+image 命名,確認有沒有 PATH fix),再 my_website;debug 過程留下的
+`docker.io/library/gelp:latest` 中間映像已從 containerd 清掉。*
