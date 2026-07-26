@@ -546,7 +546,7 @@ polls `origin/main` every minute and rebuilds on change. *建 Deployment/Service
 Ingress,再裝每分鐘輪詢 origin/main、有變才重建的 timer。*
 
 ```bash
-sudo kubectl apply -f /opt/my_website/k8s/                          # 套 Deployment(映像未 build)+ Service + Ingress(lans-h.cc)
+kubectl apply -f /opt/my_website/k8s/                              # 套 Deployment(映像未 build)+ Service + Ingress;不用 sudo(opc 用 644 kubeconfig)
 sudo chmod +x /opt/my_website/deploy/poll.sh                       # 確保可執行
 sudo cp /opt/my_website/deploy/deploy-poll.service /etc/systemd/system/   # 安裝 service unit
 sudo cp /opt/my_website/deploy/deploy-poll.timer /etc/systemd/system/     # 安裝 timer unit
@@ -568,7 +568,7 @@ the gelp bugs (PATH / image name) — all pre-fixed, but confirmed only by runni
 ### 4. Verify(pending)
 
 ```bash
-sudo kubectl rollout status deployment/lans-h-site   # 應為 successfully rolled out
+kubectl rollout status deployment/lans-h-site        # 應為 successfully rolled out(opc,不用 sudo)
 curl -sI https://lans-h.cc | head -1                 # 期望 HTTP/2 200 + 有效 TLS(平台 wildcard 自動涵蓋 apex)
 # 確認 Cloudflare apex A 記錄:lans-h.cc → 92.5.135.46(灰雲)
 ```
