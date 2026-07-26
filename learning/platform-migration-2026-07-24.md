@@ -31,8 +31,9 @@ told inline where they hit, with how they were solved.
 | ☐ | 清掉 Cloudflare 殘留的 `_acme-challenge` TXT 記錄(純衛生) |
 | ✅ | my_website 對外驗證:`curl -sI https://lans-h.cc` → HTTP/2 200 + 有效憑證;首頁 HTML 為真 Astro build;`localhost/lans-h-site:latest` 在 containerd(2026-07-26) |
 | ✅ | my_website poll → webhook 完成(2026-07-26):repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`;節點重跑 installer(三把 secret)、移除 poll timer;GitHub 設 webhook。首次真部署 `4756303`(footer/site/README 的 `lans-h.ai`→`lans-h.cc`)經 webhook 全鏈驗證通過。見 Day 5 步驟 5–6 |
+| 🟡 | **CI 測試門(route A,gelp/transigen)** 2026-07-26:兩個 repo 各加 `.github/workflows/deploy.yml`(`next build` 通過才 HMAC-`curl` 節點 `:9000` 的 `deploy-<app>`)。gelp `8c59972` / transigen `ba35c1fa`(在 main;transigen WIP 分支 `webaudio-playback` 未動)。**剩人工步驟**:①每個 repo 加 Actions secret `DEPLOY_WEBHOOK_SECRET`(=節點對應那把)②確認 Actions deploy job 綠 ③刪掉 repo 原生 push webhook(否則雙重觸發、繞過門)。與 tag-gate flip 二擇一/可並存 |
 | ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 |
-| ☐ | tag-gate flip:gelp/transigen 由 push-to-main 改為 `v*` tag(對齊 snoopy) |
+| ☐ | tag-gate flip:gelp/transigen 由 push-to-main 改為 `v*` tag(對齊 snoopy)—— 注意:上面 route A 已把「gate」放進 Actions,若走 route A 則此列的 hooks.json `v*` 改法可能不再需要(重新評估) |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
 
 ---
@@ -729,13 +730,15 @@ sudo git -C /opt/my_website reset --hard origin/main       # 應含 deploy/deplo
 sudo test -x /opt/my_website/deploy/deploy.sh && echo ok   # 確認可執行
 
 # node — platform checkout 也更新,拿到新的 hooks.json + installer
-sudo git -C /opt/platform pull --ff-only   # (路徑依你節點上的 platform checkout 而定)
+# 這台的 platform checkout 在 ~opc/platform(= /home/opc/platform),不是 /opt
+sudo git -C ~/platform pull --ff-only
 
 # node — 重跑 installer,帶齊三把 secret(整份重渲染 /etc/webhook/hooks.json 並 restart)
+# secret 事先產好存進 shell 變數($MY_WEBSITE_WH = openssl rand -hex 32),GitHub 端用同一把
 sudo GELP_WEBHOOK_SECRET="$GELP_WH" \
      TRANSIGEN_WEBHOOK_SECRET="$TRAN_WH" \
-     MY_WEBSITE_WEBHOOK_SECRET="$(openssl rand -hex 32)" \
-     bash /opt/platform/bootstrap/install-webhook.sh   # ← 記下這把新 secret,GitHub 端要用同一個
+     MY_WEBSITE_WEBHOOK_SECRET="$MY_WEBSITE_WH" \
+     bash ~/platform/bootstrap/install-webhook.sh
 systemctl status webhook                                # active (running);訊息列出 3 個 hook
 
 # node — 退掉舊的 poll 機制(webhook 接手後就多餘)
