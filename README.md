@@ -16,8 +16,8 @@ wildcard 憑證、一個 webhook listener。App repo 各自擁有自己的 build
 | App | Repo | Trigger | Gate → prod | URL |
 |---|---|---|---|---|
 | snoopy | `snoopy_home` | GitHub Actions SSH-pull | `v*` tag | none — zero-inbound bot |
-| gelp | `gelp` | webhook push (`:9000`) | `v*` tag (pending flip) | `gelp.lans-h.cc` |
-| transigen | `transigen` | webhook push (`:9000`) | `v*` tag (pending flip) | `transigen.lans-h.cc` |
+| gelp | `gelp` | CI (`next build`) → webhook (`:9000`) | build must pass (route A) | `gelp.lans-h.cc` |
+| transigen | `transigen` | CI (`next build`) → webhook (`:9000`) | build must pass (route A) | `transigen.lans-h.cc` |
 | my_website | `my_website` | webhook push (`:9000`) | push-to-main | `lans-h.cc` (+`www` 301) |
 
 ## Layout
