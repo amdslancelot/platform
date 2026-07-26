@@ -97,10 +97,18 @@ this; gelp/transigen do not, "tag-gate flip" is deferred/optional).
 ## Outstanding
 
 Cloudflare API token roll (it appeared plaintext in an earlier chat) + prune
-leftover `_acme-challenge` TXT; Gate 7 (retire apps' old `setup-server.sh` /
-`setup-app.sh`); optional tag-gate flip for gelp/transigen; optional
-`shred -u /opt/<app>/.env.prod`. Tracked in `docs/runbook.md` and the migration
-log's Outstanding table.
+leftover `_acme-challenge` TXT; optional tag-gate flip for gelp/transigen;
+optional `shred -u /opt/<app>/.env.prod`. Tracked in `docs/runbook.md` and the
+migration log's Outstanding table.
+
+**Gate 7 done (2026-07-26)** — retired the app repos' prod node-level scripts:
+gelp `setup-server.sh` gutted to app-onboarding + `deploy/webhook/` deleted;
+transigen setup-app.sh's DB-provision/webhook steps dropped + `deploy/webhook/`
+deleted; snoopy `prod-k3s-runbook.md` got platform-handover pointers. **Kept, not
+deleted** (the plan said delete): gelp/transigen `provision-db.sh` and snoopy
+`deploy/k8s/postgres.yaml` — each still backs that app's local **minikube**
+dev/staging, which platform (prod-only) never touches. my_website was already
+clean from Gate 6.
 
 ## Conventions
 

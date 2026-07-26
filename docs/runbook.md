@@ -157,21 +157,46 @@ git-poll 上車,之後改接共用 webhook(這裡加 `deploy-my_website` hook、
 `deploy/deploy.sh`、退掉 poll timer),讓所有 push 觸發的 app 共用同一套機制。
 snoopy 什麼都不用做。*
 
-## Gate 7 — retire the moved copies
+## Gate 7 — retire the moved copies ✅ (2026-07-26)
 
-Only after every gate above is verified live:
+Done, once every gate above was verified live. **Correction to the original
+plan:** two files it said to "delete" were **kept**, because the same file also
+backs each app's local **minikube** dev/staging, which platform (prod-only) does
+not touch — deleting would have broken local dev. The rule became: retire the
+*prod* usage, keep the file if staging still needs it.
 
-- `snoopy_home`: delete `deploy/k8s/postgres.yaml`; point its runbook at this
-  repo for Gates it no longer owns (Postgres, node bootstrap).
-- `gelp`: delete the cert-manager/hooks/webhook-install parts of
-  setup-server.sh + deploy.sh, `deploy/webhook/`, prod overlay
-  `clusterissuer.yaml`.
-- `transigen`: delete `deploy/provision-db.sh`, `deploy/webhook/`, the
-  hook-append and DB-provision steps of setup-app.sh.
-- `my_website`: replace DEPLOY.md's install sections with a pointer here.
+- `snoopy_home`: **kept** `deploy/k8s/postgres.yaml` (`setup-minikube.sh` + the
+  dev-stage runbook still apply it locally); only added handover pointers in
+  `docs/prod-k3s-runbook.md` — on the live node, node bootstrap (Gate 1) and the
+  shared Postgres (Gate 2) are platform's now. Commit `a654adf`.
+- `gelp`: gutted `setup-server.sh` down to app onboarding (clone + first deploy)
+  plus a pointer to platform for node bootstrap / webhook / TLS; deleted
+  `deploy/webhook/`; updated README + deploy/README. (deploy.sh and the prod
+  `clusterissuer.yaml` were already cleaned in Gate 6.) Commit `3feee1d`.
+- `transigen`: dropped setup-app.sh's DB-provision (step 2) and webhook-hook
+  (step 4) steps; deleted `deploy/webhook/`; **kept** `deploy/provision-db.sh`
+  (stage.sh still pipes it into the minikube staging Postgres); updated README +
+  deploy/README, incl. the stale `letsencrypt-prod` ClusterIssuer line. Edited on
+  `main` via a git worktree (the checkout was on a feature branch with unrelated
+  uncommitted work). Commits `5245e053`, `b9b8c346` (a `${VAR:?...}` apostrophe
+  syntax fix).
+- `my_website`: **already done** in Gate 6 — DEPLOY.md points wholly at platform.
 
-*全部關卡驗證完、platform 確定是 live source 之後,才回頭刪各 app repo 裡被
-搬走的副本,並把它們的文件指到這裡。*
+Staging/dev verified unbroken in all four repos: only prod/onboarding scripts and
+docs changed; every staging input (stage.sh, the staging overlays, the
+minikube-facing provision scripts) is untouched.
+
+*Gate 7 已於 2026-07-26 完成。**對原計畫的修正**:原本寫「刪除」的兩個檔案改為
+**保留**——因為同一個檔也支撐各 app 本地 **minikube** 的 dev/staging,而 platform
+只管 prod、不碰 minikube,直接刪會弄壞本地開發。原則改為:退掉 *prod* 用途,若
+staging 還需要就保留檔案。snoopy_home 保留 `postgres.yaml`(minikube 仍用),只在
+`prod-k3s-runbook.md` 加指向 platform 的交接註記;gelp 把 `setup-server.sh` 縮成
+只做 app 上車 + 指向 platform,刪 `deploy/webhook/`;transigen 移除 setup-app.sh 的
+DB-provision 與 webhook-hook 兩步、刪 `deploy/webhook/`、但**保留 `provision-db.sh`**
+(stage.sh 的 minikube staging 還要用),並清掉陳舊的 `letsencrypt-prod` 參照,改動在
+`main` 上透過 git worktree 完成(其 checkout 正在一個有未提交工作的 feature 分支);
+my_website 在 Gate 6 就已完成。四個 repo 的 staging/dev 全數驗證未壞:只動 prod/上車
+腳本與文件,所有 staging 輸入原封不動。*
 
 ## Pending (deliberate, not yet done)
 

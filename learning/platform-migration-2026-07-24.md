@@ -32,7 +32,7 @@ told inline where they hit, with how they were solved.
 | ✅ | my_website 對外驗證:`curl -sI https://lans-h.cc` → HTTP/2 200 + 有效憑證;首頁 HTML 為真 Astro build;`localhost/lans-h-site:latest` 在 containerd(2026-07-26) |
 | ✅ | my_website poll → webhook 完成(2026-07-26):repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`;節點重跑 installer(三把 secret)、移除 poll timer;GitHub 設 webhook。首次真部署 `4756303`(footer/site/README 的 `lans-h.ai`→`lans-h.cc`)經 webhook 全鏈驗證通過。見 Day 5 步驟 5–6 |
 | ✅ | **CI 測試門(route A,gelp/transigen)完成** 2026-07-26:兩個 repo 各加 `.github/workflows/deploy.yml`(`next build`=type+lint+route 通過才 HMAC-`curl` 節點 `:9000` 的 `deploy-<app>`)。gelp `8c59972` / transigen `ba35c1fa`(在 main;transigen WIP 分支 `webaudio-playback` 用 stash 保全未動)。各 repo 已加 Actions secret `DEPLOY_WEBHOOK_SECRET`(=節點對應那把),build+deploy 皆綠;原生 push webhook 已 uncheck Active(停用,可逆)→ push 只走有門路徑。三隻仍共用同一 :9000 listener,gelp/transigen 多一層 build 門。註:`next build` 在 CI 不需額外 env/DB(第一次就綠) |
-| ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 —— **具體檢查清單見下方「Gate 7」段**(只剩 gelp + transigen;my_website 已 clean) |
+| ✅ | **Gate 7 完成 2026-07-26**:gelp `setup-server.sh` 縮成 app 上車(`3feee1d`)、transigen `setup-app.sh` 去掉 DB-provision+webhook 步驟(`5245e053`+`b9b8c346`)、兩者 `deploy/webhook/` 皆刪;snoopy `prod-k3s-runbook.md` 加交接註記(`a654adf`);my_website Gate 6 已 clean。**修正**:原計畫要刪的 gelp/transigen `provision-db.sh` 與 snoopy `postgres.yaml` 改為**保留**(本地 minikube dev/staging 仍需)。四 repo staging/dev 驗證未壞。詳見下方「Gate 7」段 |
 | ☐ | tag-gate flip(**可選,與 route A 正交**):route A 給的是「**測試**門」(build 過才部署,但仍每次 push main 就部署);tag-gate 給的是「**發版**紀律」(只有 `v*` tag 才部署)。兩者是不同軸,可疊。若要發版紀律,把 workflow 的 `on: push: branches:[main]` 改成 `on: push: tags:['v*']` 即可(不用碰 hooks.json,因為觸發已移到 Actions)。目前未做,先觀察 |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
 
@@ -792,6 +792,40 @@ really just gelp + transigen**. Do this from the **platform project** session
 驗證:gelp `deploy.sh` 已無 cert-manager(Gate 6 清過)、my_website `DEPLOY.md` 已
 指向 platform,所以 **Gate 7 實際上只剩 gelp + transigen**。在 platform project 的
 session 做(它能用絕對路徑編輯 sibling app repo)。*
+
+> ### ✅ 完成 2026-07-26 —— 實際做法(與下方清單有差異)/ Done, with corrections
+>
+> **Goal recap:** retire the *prod* node-level scripts, but keep any file the
+> app's local **minikube** dev/staging still needs — platform is prod-only and
+> never touches minikube. Two "delete" lines in the checklist below became "keep".
+>
+> - **gelp** (`3feee1d`): `setup-server.sh` **gutted** to app onboarding (clone +
+>   first deploy) + a pointer to platform — *not* deleted; `deploy/webhook/`
+>   deleted; `scripts/provision-db.sh` **kept** (out of Gate-7 scope, still gelp's
+>   own script). README + deploy/README updated.
+> - **snoopy_home** (`a654adf`): `deploy/k8s/postgres.yaml` **kept** —
+>   `setup-minikube.sh` + the dev-stage runbook still apply it. Only added handover
+>   pointers to `docs/prod-k3s-runbook.md` (Gate 1 bootstrap + Gate 2 Postgres are
+>   platform's on the live node).
+> - **transigen** (`5245e053` + `b9b8c346`): setup-app.sh's DB-provision (step 2)
+>   and webhook-hook (step 4) steps **removed** but the script **kept**;
+>   `deploy/webhook/` deleted; **`deploy/provision-db.sh` KEPT** — `stage.sh` pipes
+>   it into the minikube staging Postgres. Done on `main` via a git worktree; the
+>   `webaudio-playback` WIP was never touched.
+> - **my_website**: already clean (Gate 6).
+>
+> **問題 / Problem:** 原清單要 `git rm` gelp `scripts/provision-db.sh`、transigen
+> `deploy/provision-db.sh`,但這兩者(及 snoopy `postgres.yaml`)同時是各 app 本地
+> **minikube** dev/staging 的資料層腳本 —— platform 只管 prod、不碰 minikube,直接刪
+> 會弄壞本地開發。**解法 / Fix:** 退掉 *prod* 用途、檔案保留;四個 repo 的 staging/dev
+> 全數驗證未壞(每個 staging 輸入 stage.sh / staging overlay / provision-db.sh 皆原封不動)。
+>
+> **踩雷 / Gotcha:** transigen `setup-app.sh` 的 `${TRANSIGEN_DB_PASSWORD:?…訊息}` 訊息裡
+> 含撇號(`platform's`),在 `${VAR:?word}` 語境會被 bash 當成開單引號 → `bash -n` 報
+> unexpected EOF。先 push 才抓到(setup-app.sh 不在部署路徑,線上無影響),去撇號後補了
+> fix commit `b9b8c346`。**教訓:改完 shell 腳本先 `bash -n` 再 commit。**
+>
+> *(下方 7a–7c 是原始計畫清單,保留作對照;實際刪/留以本區塊為準。)*
 
 ### 7a. gelp —— 刪舊腳本 + 更新 README
 
