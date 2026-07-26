@@ -32,7 +32,7 @@ told inline where they hit, with how they were solved.
 | ✅ | my_website 對外驗證:`curl -sI https://lans-h.cc` → HTTP/2 200 + 有效憑證;首頁 HTML 為真 Astro build;`localhost/lans-h-site:latest` 在 containerd(2026-07-26) |
 | ✅ | my_website poll → webhook 完成(2026-07-26):repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`;節點重跑 installer(三把 secret)、移除 poll timer;GitHub 設 webhook。首次真部署 `4756303`(footer/site/README 的 `lans-h.ai`→`lans-h.cc`)經 webhook 全鏈驗證通過。見 Day 5 步驟 5–6 |
 | ✅ | **CI 測試門(route A,gelp/transigen)完成** 2026-07-26:兩個 repo 各加 `.github/workflows/deploy.yml`(`next build`=type+lint+route 通過才 HMAC-`curl` 節點 `:9000` 的 `deploy-<app>`)。gelp `8c59972` / transigen `ba35c1fa`(在 main;transigen WIP 分支 `webaudio-playback` 用 stash 保全未動)。各 repo 已加 Actions secret `DEPLOY_WEBHOOK_SECRET`(=節點對應那把),build+deploy 皆綠;原生 push webhook 已 uncheck Active(停用,可逆)→ push 只走有門路徑。三隻仍共用同一 :9000 listener,gelp/transigen 多一層 build 門。註:`next build` 在 CI 不需額外 env/DB(第一次就綠) |
-| ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 |
+| ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 —— **具體檢查清單見下方「Gate 7」段**(只剩 gelp + transigen;my_website 已 clean) |
 | ☐ | tag-gate flip(**可選,與 route A 正交**):route A 給的是「**測試**門」(build 過才部署,但仍每次 push main 就部署);tag-gate 給的是「**發版**紀律」(只有 `v*` tag 才部署)。兩者是不同軸,可疊。若要發版紀律,把 workflow 的 `on: push: branches:[main]` 改成 `on: push: tags:['v*']` 即可(不用碰 hooks.json,因為觸發已移到 Actions)。目前未做,先觀察 |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
 
@@ -774,6 +774,74 @@ deploy happening at all proves the webhook path — not a leftover poll.
 *首次真部署是 commit `4756303`,journalctl 看到 `deploy-my_website` 觸發 → build →
 import → rollout 成功 → Deploy complete;新 pod Running,`curl` 回
 `<footer>lans-h.cc</footer>`。poll timer 已移除,能部署本身就證明走的是 webhook。*
+
+---
+
+## Gate 7 — 退休被 platform 取代的舊副本(檢查清單)
+
+Gate 7 deletes the node-level scripts that used to live in the app repos and are
+now owned by `platform`. They're dead weight and actively misleading — a future
+reader could run gelp's `setup-server.sh` and re-bootstrap the live node.
+Verified 2026-07-26: gelp's `deploy.sh` is already cert-manager-free (cleaned in
+Gate 6) and my_website's `DEPLOY.md` already points at platform, so **Gate 7 is
+really just gelp + transigen**. Do this from the **platform project** session
+(it can edit the sibling app repos by absolute path).
+
+*Gate 7 刪掉那些曾住在 app repo、現在歸 platform 的節點級腳本——它們是死重、還會
+誤導(有人可能跑 gelp 的 `setup-server.sh` 把線上節點重新 bootstrap)。2026-07-26
+驗證:gelp `deploy.sh` 已無 cert-manager(Gate 6 清過)、my_website `DEPLOY.md` 已
+指向 platform,所以 **Gate 7 實際上只剩 gelp + transigen**。在 platform project 的
+session 做(它能用絕對路徑編輯 sibling app repo)。*
+
+### 7a. gelp —— 刪舊腳本 + 更新 README
+
+先確認路徑,再刪。deploy.sh / Dockerfile / k8s/ / stage.sh 是 app 自己的,**保留**。
+
+```bash
+cd ~/Documents/claude/gelp
+ls deploy/setup-server.sh deploy/webhook scripts/provision-db.sh   # 確認這三個存在再刪
+git rm deploy/setup-server.sh          # 舊節點 bootstrap → platform/bootstrap/bootstrap-node.sh 取代
+git rm -r deploy/webhook               # hooks.json+README → platform/webhook/hooks.json 取代
+git rm scripts/provision-db.sh         # → platform/cluster/data-postgres/provision-db.sh 取代
+# 手動更新 README.md(L12、L62、L169-189)+ deploy/README.md(L12、L35、L92-93):
+#   移除 setup-server.sh / deploy/webhook / scripts/provision-db.sh 的段落,
+#   改成「節點與共用 DB 由 platform repo 提供,見 platform/docs/runbook.md」
+git add README.md deploy/README.md
+git commit -m "chore(deploy): retire node bootstrap/webhook/provision now owned by platform"
+git push origin main
+```
+Expect: gelp repo 只剩 app 部署物(`deploy/{deploy.sh,Dockerfile,k8s,stage.sh}`);README 不再教人 bootstrap 節點。push 會觸發 route A(next build → 部署),冪等無害。
+
+### 7b. transigen —— 同上,但在 main、用 worktree 避開 WIP
+
+transigen 工作樹停在 `webaudio-playback`(有 WIP)。用 worktree 在 main 上做,別碰 WIP。
+
+```bash
+# 建 main 的 worktree(scratch 路徑隨意)
+git -C ~/Documents/Cursor/transigen worktree add /tmp/transigen-main main
+cd /tmp/transigen-main
+ls deploy/setup-app.sh deploy/provision-db.sh deploy/webhook   # 確認存在
+git rm deploy/setup-app.sh             # 舊「加到 gelp-style 節點」腳本 → platform 取代
+git rm deploy/provision-db.sh          # → platform/cluster/data-postgres/provision-db.sh 取代
+git rm -r deploy/webhook               # hooks.json → platform/webhook/hooks.json 取代
+# 更新 deploy/README.md(L16、L34、L52-57、L92-95):移除上述引用,改指 platform
+git add deploy/README.md
+git commit -m "chore(deploy): retire node-level scripts now owned by platform"
+git push origin main
+# 收掉 worktree(WIP 分支全程未動)
+git -C ~/Documents/Cursor/transigen worktree remove /tmp/transigen-main
+```
+Expect: transigen main 只剩 app 部署物;`webaudio-playback` 的 WIP 一根寒毛沒動。push 觸發 route A 部署。
+
+### 7c. my_website —— 只驗證,無需刪
+
+Already clean:poll units 在 webhook 切換時已移除、`DEPLOY.md` 已指向 platform。可選裝飾:把它的 manifests 從 `default` ns 搬到 `web` ns(純整潔,非必要)。
+
+```bash
+grep -c 'poll' ~/Documents/claude/my_website/deploy/* 2>/dev/null   # 期望只剩 deploy.sh、無 poll 檔
+```
+
+**完成後**:三個 app repo 都只剩「自己的 build+deploy」,所有節點/叢集/共用 DB 只在 platform repo 一處。回來把上面 Outstanding 的 Gate 7 那列打勾。
 
 ---
 
