@@ -18,7 +18,7 @@ problem hit and how it was solved. Updated continuously until the migration
 | 3 | Postgres no-op 擁有權交接 | ✅ | 2026-07-24 |
 | 4 | TLS 全鏈(cert-manager → Cloudflare DNS-01 → wildcard → Traefik 預設憑證) | ✅ | 2026-07-24 ~08:0x |
 | 5 | webhook listener (:9000) | ✅ | 2026-07-25 07:11 |
-| 6 | app 上車(gelp ✅ / transigen ⬜ / my_website ⬜) | 🟡 | gelp 2026-07-25 |
+| 6 | app 上車(gelp ✅ / transigen ✅ / my_website ⬜) | 🟡 | gelp 2026-07-25 · transigen 2026-07-26 |
 | 7 | 清理各 app repo 舊副本 | ⬜ | — |
 
 **Outstanding / 未結事項**
@@ -760,3 +760,159 @@ header(單一 :9000 listener,只靠路徑 `/hooks/<id>` 路由,故 id 要全域�
 *可選加固:shred 掉 `.env.prod`;下一步 transigen(同套路,它 deploy.sh 已處理
 image 命名,確認有沒有 PATH fix),再 my_website;debug 過程留下的
 `docker.io/library/gelp:latest` 中間映像已從 containerd 清掉。*
+
+---
+
+## Day 4 — transigen onboarding (2026-07-26)
+
+The deploy itself was clean: the three fixes learned from gelp were pre-applied
+to transigen's `deploy.sh` on the Mac before onboarding — the `secure_path` PATH
+export (`export PATH="/usr/local/bin:${PATH}"`), the `localhost/transigen` image
+name (kustomize `newName`, no `docker.io/library` detour), and the `.env.prod`
+dotfile path. So Gate 6 deploy → pod `Running 1/1` first try. The interesting
+part was **after** deploy: login broke, and the root cause was a mistake of mine
+in how I seeded the schema. Three pitfalls below, each worth reusing.
+
+*部署本身很乾淨:gelp 學到的三個修正在上車前就先套進 transigen 的 `deploy.sh`
+(PATH export、`localhost/transigen` image 命名、`.env.prod` dotfile 路徑),
+所以 Gate 6 一次就 `Running 1/1`。真正有料的是**部署之後**:登入壞掉,根因是我
+自己 seed schema 的方式出錯。以下三個坑,每個都可重用。*
+
+### Pitfall 1 — the lazy-migration trap (登入 `error=Configuration` 的真凶)
+
+**Symptom:** Google login redirected to
+`/api/auth/error?error=Configuration`. Pod logs showed two errors: a one-off
+`iss (issuer) missing` on the first try, then the definitive one —
+`Migration 0001_init.sql failed: trigger "trg_users_updated_at" for relation
+"users" already exists`, thrown from inside the Auth.js `jwt` callback.
+
+**Root cause (my mistake):** I had manually applied `db/migrations/0001_init.sql`
+via `psql` to stand up the schema, assuming the app had no auto-migrate step
+(I'd only checked the Dockerfile / `package.json`). Wrong. `src/lib/db.ts` runs
+migrations **lazily on the first DB query** (`getPool()` → `runMigrations()`),
+tracked in a `schema_migrations` table — its own comment says *"deploys need no
+separate migrate step."* My manual apply created every object but **never
+recorded `0001_init.sql` in `schema_migrations`**. So on first login the app's
+lazy migrator saw an empty ledger, re-ran `0001_init.sql`, and died on
+`create trigger trg_users_updated_at` — which is **not idempotent** (no
+`IF NOT EXISTS`, no drop-first), because the trigger already existed from my
+manual apply. Migration throws → the query that triggered it throws → the `jwt`
+callback throws → Auth.js reports `Configuration`.
+
+**Fix:** tell the ledger the migration is already applied, so the lazy migrator
+skips it. The DB was already in the correct post-0001 state, so this is a pure
+bookkeeping insert (run as `transigen_rw`, who owns the table):
+
+```bash
+kubectl -n data exec -i deploy/postgres -- \
+  psql "postgres://transigen_rw:<hex>@localhost:5432/transigen" -c \
+  "insert into schema_migrations (name) values ('0001_init.sql') on conflict (name) do nothing;"
+# → INSERT 0 1 ; then login (fresh incognito) succeeded, user row created.
+```
+
+**Lesson:** if an app self-migrates (even lazily on first query), **never
+hand-apply its migration files** — let the app own its ledger, or if you must
+seed manually, insert the tracking row in the same breath. The `iss missing`
+first-error was unrelated stale-cookie noise; a fresh incognito window cleared
+it. Verify the auto-migrate path by reading the DB bootstrap (`db.ts`), not just
+the Dockerfile.
+
+*症狀:Google 登入導到 `error=Configuration`,pod log 顯示
+`Migration 0001_init.sql failed: trigger ... already exists`(從 Auth.js `jwt`
+callback 拋出)。根因(我的錯):我以為 app 沒有自動 migrate(只看了 Dockerfile/
+package.json),就手動 psql 套用了 schema——但 `src/lib/db.ts` 會在**首次查詢時
+惰性跑 migration**,記錄在 `schema_migrations`。我手動套用建好了所有物件卻沒登記,
+於是 app 的惰性 migrator 又重跑一次 `0001_init.sql`,撞上**非冪等**的
+`create trigger`(trigger 已存在)→ 整條 login 鏈拋錯。修法:把該 migration 補登
+進 `schema_migrations`(DB 已是正確狀態,純記帳),惰性 migrator 就跳過。教訓:app
+會自我 migrate(哪怕只在首次查詢)就**別手動套用它的 migration 檔**;要看 DB
+bootstrap(`db.ts`)確認,不能只看 Dockerfile。`iss missing` 是無關的舊 cookie
+殘留,換無痕視窗就消失。*
+
+### Pitfall 2 — fixed-id vs seeded-id preset conflict (資料搬遷的 `code` 撞鍵)
+
+`0001_init.sql` seeds the 6 `transition_presets` rows with **random UUIDs**
+(`on conflict (code)`), but the Jul-23 `pg_dump` data snapshot inserts the same
+6 presets with their **original fixed UUIDs** (plain `INSERT`, no `on conflict`).
+The dump's `transition_proposals` reference presets **by those fixed ids**. Load
+the dump on top of the seeded rows → duplicate-key on the `code` unique
+constraint. Keeping the seeded (random-id) presets would also orphan the
+proposals' `preset_id` FKs. **Fix:** delete the seeded presets first, then load
+the dump's fixed-id presets — done atomically so a mid-load failure can't leave
+a half state:
+
+```bash
+# prepend the DELETE to the data-only dump, then load the whole thing in one txn
+{ echo "DELETE FROM public.transition_presets;"; sed 's/<OLD_UUID>/<PROD_UUID>/g' data.sql; } > data.prod.sql
+kubectl -n data exec -i deploy/postgres -- \
+  psql "postgres://transigen_rw:<hex>@localhost:5432/transigen" \
+  --single-transaction -v ON_ERROR_STOP=1 < data.prod.sql
+# → DELETE 6 ; 46×INSERT 0 1 ; presets end at 6 with the dump's fixed ids
+```
+
+*`0001_init.sql` 用**隨機 UUID** seed 6 筆 preset,但 pg_dump 快照用**原本的固定
+UUID** 插同樣 6 筆,且 dump 裡的 proposals 是**按固定 id** 參照 preset。直接疊上去
+→ `code` unique 撞鍵。修法:先刪掉 seed 的 presets,再灌 dump 的固定 id 版,整包用
+`--single-transaction` 原子化,中途失敗全 rollback。*
+
+### Pitfall 3 — re-pointing data to the prod user (UUID 重指)
+
+The dump had **no `users` row** (login creates it via `on conflict (google_sub)`
+upsert), but every child table referenced the old dev user UUID. So the
+migration recipe was: log in on prod first to mint the prod user row, read its
+UUID, then `sed` the dump old-UUID → prod-UUID (19 occurrences here) before
+loading. Verified with per-table `count(*)` matching the Jul-23 snapshot
+(rooms 3, proposals 8, pairs 5, presets 6, etc. — 46 rows total). The data file
+(real user data) was `shred -u`'d from both Mac and node afterward.
+
+*dump 裡**沒有 users 列**(登入時用 `on conflict (google_sub)` upsert 自建),但
+所有子表都參照舊 dev user UUID。所以搬遷順序是:先在 prod 登入建好 user 列 → 讀其
+UUID → `sed` 把 dump 裡舊 UUID 換成 prod UUID(這裡 19 處)→ 再載入。用每張表
+`count(*)` 對照 7/23 快照驗證(共 46 列)。含真實資料的檔案事後在 Mac 與 node 都
+`shred -u` 抹除。*
+
+### Env-file convention unification (順手統一 env 慣例)
+
+While onboarding, transigen's deploy env files were unified with the repo's
+conventions: `deploy/env.prod` → `deploy/.env.prod` (dotfile; gitignored),
+committed placeholder is `deploy/.env.prod.example`; `deploy/env.staging` split
+into `.env.staging.example` (committed, dev/test values, no real secrets) +
+`.env.staging` (gitignored). Rationale: `.example` is the safe, tracked template;
+the real file is always gitignored. These live in `deploy/` (not repo root)
+because they're **inputs to the deploy tooling** — `deploy.sh` reads them to
+build the k8s Secret; the app in the pod reads env vars from that Secret, not
+from a file. Same Google OAuth client is shared across dev/staging/prod.
+
+*上車時順手把 transigen 的 env 檔統一慣例:`env.prod`→`.env.prod`(dotfile、
+gitignore),committed 的是 `.env.prod.example`;`env.staging` 拆成
+`.env.staging.example`(committed、dev/test 值無真密碼)+`.env.staging`
+(gitignore)。放 `deploy/` 而非根目錄,因為它們是**部署工具的輸入**——`deploy.sh`
+讀它們組 k8s Secret,pod 裡的 app 是從 Secret 讀環境變數、不是讀檔。dev/staging/
+prod 共用同一個 Google OAuth client。*
+
+### Known cosmetic issue (既有小瑕疵,非遷移造成)
+
+On a room page, **"Play full set" is disabled until both hidden YouTube deck
+players fire `onReady`** (`RoomFullSetPlayer.tsx`: `playDisabled = !playersReady
+|| … || !chainReady`; `playersReady` needs `r0 && r1`). On first navigation the
+button can sit greyed with a "Loading players…" hint; a page reload fixes it.
+Data was fully correct (3 valid edges built). Not a migration bug — logged as a
+transigen TODO candidate (retry/auto-reload on player-ready timeout).
+
+*room 頁的「Play full set」在兩個隱藏 YouTube player 都 `onReady` 前是 disabled,
+首次進頁可能卡灰(旁邊有「Loading players…」),reload 即可。資料完全正確(edges
+有 3 條),非遷移 bug,列為 transigen TODO 候選。*
+
+### Follow-ups (transigen) / 待辦
+
+- [x] transigen LIVE at `https://transigen.lans-h.cc`, Google login working, data
+      migrated (46 rows), old rooms/proposals visible in UI.
+- [ ] Next: **my_website** onboarding (Gate 6 last app), then Gate 7 cleanup.
+- [ ] Still open (all apps): Roll the Cloudflare API token + update the
+      `cloudflare-api-token` Secret; prune `_acme-challenge` TXT records.
+- [ ] Optional: transigen TODO — player-ready retry so "Play full set" doesn't
+      need a manual reload.
+
+*transigen 已 LIVE、登入正常、資料搬遷完成(46 列)、UI 看得到舊 room;下一步
+my_website(Gate 6 最後一個 app),再 Gate 7 清理;Cloudflare token roll 仍待全部
+完成後處理。*
