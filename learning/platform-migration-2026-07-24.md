@@ -30,7 +30,7 @@ told inline where they hit, with how they were solved.
 | ☐ | Cloudflare API token 曾在對話明文出現 → 全部完成後 **Roll** 新值 + 更新 `cloudflare-api-token` Secret |
 | ☐ | 清掉 Cloudflare 殘留的 `_acme-challenge` TXT 記錄(純衛生) |
 | ✅ | my_website 對外驗證:`curl -sI https://lans-h.cc` → HTTP/2 200 + 有效憑證;首頁 HTML 為真 Astro build;`localhost/lans-h-site:latest` 在 containerd(2026-07-26) |
-| 🟡 | my_website poll → webhook:程式碼改動已完成(repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`)。**剩節點步驟**:產 secret → pull → 重跑 installer(帶三把 secret)→ 停 `deploy-poll.timer` → GitHub 設 webhook。見 Day 5 |
+| ✅ | my_website poll → webhook 完成(2026-07-26):repo 加 `deploy/deploy.sh`、退掉 poll units;platform `hooks.json`+`install-webhook.sh`+docs 加 `deploy-my_website`;節點重跑 installer(三把 secret)、移除 poll timer;GitHub 設 webhook。首次真部署 `4756303`(footer/site/README 的 `lans-h.ai`→`lans-h.cc`)經 webhook 全鏈驗證通過。見 Day 5 步驟 5–6 |
 | ☐ | Gate 7:退休各 app 的舊 `setup-server.sh` / `setup-app.sh` 等節點級腳本 |
 | ☐ | tag-gate flip:gelp/transigen 由 push-to-main 改為 `v*` tag(對齊 snoopy) |
 | ☐ | 可選加固:`shred -u /opt/<app>/.env.prod` |
@@ -759,6 +759,18 @@ rollout。*
 Expect the push to deploy with no poll timer involved → my_website now shares the
 one webhook mechanism with gelp/transigen. *push 後不靠 poll 就部署 → my_website 與
 gelp/transigen 共用同一套 webhook。*
+
+**驗證通過(2026-07-26 20:47 UTC):** the first real webhook deploy was commit
+`4756303` (footer / astro `site` / README `lans-h.ai`→`lans-h.cc`). `journalctl
+-u webhook` showed `deploy-my_website` triggered → `deploy.sh` → podman build →
+containerd import → `deployment "lans-h-site" successfully rolled out` → `Deploy
+complete`. New pod Running, `curl -s https://lans-h.cc` returned
+`<footer>lans-h.cc</footer>`. Since the poll timer was already removed, the
+deploy happening at all proves the webhook path — not a leftover poll.
+
+*首次真部署是 commit `4756303`,journalctl 看到 `deploy-my_website` 觸發 → build →
+import → rollout 成功 → Deploy complete;新 pod Running,`curl` 回
+`<footer>lans-h.cc</footer>`。poll timer 已移除,能部署本身就證明走的是 webhook。*
 
 ---
 
