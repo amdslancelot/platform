@@ -1,12 +1,12 @@
 # platform
 
 Single source of truth for the shared infrastructure under the fleet: one OCI
-A1.Flex node running single-node k3s, one shared Postgres, one domain
+A1.Flex node running single-node Kubernetes, one shared Postgres, one domain
 (`lans-h.cc`, DNS on Cloudflare, registration on Spaceship), one wildcard
 certificate, one webhook listener. App repos own their own build + deploy;
 this repo owns everything two or more apps stand on.
 
-*整個機隊共用基礎設施的單一真相:一台 OCI A1.Flex 跑 single-node k3s、一個共用
+*整個機隊共用基礎設施的單一真相:一台 OCI A1.Flex 跑 single-node Kubernetes、一個共用
 Postgres、一個網域(`lans-h.cc`,DNS 在 Cloudflare、註冊在 Spaceship)、一張
 wildcard 憑證、一個 webhook listener。App repo 各自擁有自己的 build 與部署;
 凡是兩個以上 app 共同踩著的東西,歸這個 repo 管。*
@@ -23,7 +23,7 @@ wildcard 憑證、一個 webhook listener。App repo 各自擁有自己的 build
 ## Layout
 
 ```
-bootstrap/            node-level: OL9 → k3s (Traefik ENABLED), webhook listener
+bootstrap/            node-level: OL9 → Kubernetes (Traefik ENABLED), webhook listener
 webhook/hooks.json    the ONE hooks file for all apps (rendered on the node)
 cluster/
   namespaces.yaml     platform / snoopy / gelp / transigen
