@@ -206,12 +206,11 @@ my_website 在 Gate 6 就已完成。四個 repo 的 staging/dev 全數驗證未
   pushed tag instead of pulling main. Shipped together, per app. Until then
   they stay push-to-main (current live behaviour, deliberately preserved
   through the migration).
-- **my_website `web` namespace** move (cosmetic).
 - **Staging mirror** (minikube) of Gates 3-4; staging is also the future
   GitOps (Argo CD) lab — out of scope here.
 - **DB password store**: platform keeps the roster's passwords in a local
   gitignored `secrets.env` for now; SOPS/sealed-secrets is a candidate later.
 
 *待辦(刻意留到之後):gelp/transigen 的 tag-gate 切換(hooks 規則 + 各自
-deploy.sh 改 checkout tag,兩者一起出);my_website 搬 `web` namespace(裝飾性);
-staging 鏡像與 GitOps 實驗;DB 密碼改用 SOPS/sealed-secrets。*
+deploy.sh 改 checkout tag,兩者一起出);staging 鏡像與 GitOps 實驗;DB 密碼改用
+SOPS/sealed-secrets。*

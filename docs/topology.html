@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lans-h.cc fleet — infrastructure topology</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --fg:#1c2430; --muted:#5b6675; --card:#ffffff; --card2:#eef1f5;
+    --line:#8a97a8; --border:#c7cfda; --accent:#2f6df6; --live:#16a34a; --live-fg:#fff;
+    --app:#e8f0ff; --app-bd:#9cc0ff; --infra:#fbeee0; --infra-bd:#e6c79a;
+    --data:#e7f6ee; --data-bd:#9fd8b8; --platform:#f0e9fb; --platform-bd:#c9b1ee;
+    --node:#f0f3f8; --node-bd:#b6c0cf; --dim:#eef0f3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1420; --fg:#e6edf5; --muted:#93a1b4; --card:#161d2b; --card2:#1c2536;
+      --line:#5b6a80; --border:#33405a; --accent:#5b93ff; --live:#26c281; --live-fg:#07130c;
+      --app:#152744; --app-bd:#2f4f86; --infra:#33260f; --infra-bd:#6b5327;
+      --data:#0f2a1c; --data-bd:#245a3d; --platform:#241a3c; --platform-bd:#4a3a75;
+      --node:#121a28; --node-bd:#33405a; --dim:#182130;
+    }
+  }
+  :root[data-theme="dark"]{
+      --bg:#0e1420; --fg:#e6edf5; --muted:#93a1b4; --card:#161d2b; --card2:#1c2536;
+      --line:#5b6a80; --border:#33405a; --accent:#5b93ff; --live:#26c281; --live-fg:#07130c;
+      --app:#152744; --app-bd:#2f4f86; --infra:#33260f; --infra-bd:#6b5327;
+      --data:#0f2a1c; --data-bd:#245a3d; --platform:#241a3c; --platform-bd:#4a3a75;
+      --node:#121a28; --node-bd:#33405a; --dim:#182130;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --fg:#1c2430; --muted:#5b6675; --card:#ffffff; --card2:#eef1f5;
+    --line:#8a97a8; --border:#c7cfda; --accent:#2f6df6; --live:#16a34a; --live-fg:#fff;
+    --app:#e8f0ff; --app-bd:#9cc0ff; --infra:#fbeee0; --infra-bd:#e6c79a;
+    --data:#e7f6ee; --data-bd:#9fd8b8; --platform:#f0e9fb; --platform-bd:#c9b1ee;
+    --node:#f0f3f8; --node-bd:#b6c0cf; --dim:#eef0f3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;padding:28px 20px 64px;}
+  .wrap{max-width:1240px;margin:0 auto}
+  header.doc h1{font-size:26px;margin:0 0 4px}
+  header.doc .sub{color:var(--muted);font-size:15px;margin:0 0 2px}
+  header.doc .meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:8px}
+  .diagram{margin:22px 0 8px;background:var(--card);border:1px solid var(--border);
+    border-radius:14px;padding:10px;overflow-x:auto}
+  svg{display:block;width:100%;height:auto;min-width:920px}
+
+  /* SVG element styling (kept inside so the SVG exports self-contained) */
+  .container{fill:var(--node);stroke:var(--node-bd);stroke-width:1.5}
+  .tab{fill:var(--card2);stroke:var(--node-bd);stroke-width:1.2}
+  .box{stroke-width:1.4;rx:12}
+  .b-app{fill:var(--app);stroke:var(--app-bd)}
+  .b-infra{fill:var(--infra);stroke:var(--infra-bd)}
+  .b-data{fill:var(--data);stroke:var(--data-bd)}
+  .b-platform{fill:var(--platform);stroke:var(--platform-bd)}
+  .b-ext{fill:var(--card);stroke:var(--border)}
+  .b-strip{fill:var(--dim);stroke:var(--border)}
+  .t{fill:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Arial,sans-serif}
+  .title{font-size:16px;font-weight:700}
+  .nslabel{font-size:12px;font-weight:700;fill:var(--accent);letter-spacing:.3px}
+  .sub{font-size:12.5px;fill:var(--muted)}
+  .mono{font-size:12px;fill:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .edge{stroke:var(--line);stroke-width:2;fill:none}
+  .edge-lbl{font-size:11.5px;fill:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .live-pill{fill:var(--live)}
+  .live-txt{fill:var(--live-fg);font-size:12px;font-weight:700}
+  a.live{cursor:pointer}
+  a.live:hover .live-pill{opacity:.85}
+
+  .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:26px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+  .card h3{margin:0 0 10px;font-size:15px}
+  .card .zh{color:var(--muted);font-weight:400;font-size:13px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;
+    background:var(--dim);padding:1px 5px;border-radius:5px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
+    background:var(--live);color:var(--live-fg);text-decoration:none}
+  .note{color:var(--muted);font-size:12.5px;margin-top:6px}
+  ul{margin:6px 0 0;padding-left:18px}
+  li{margin:3px 0}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:28px;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <h1>lans-h.cc fleet — infrastructure topology</h1>
+    <p class="sub">Four workloads on one shared single-node k3s cluster</p>
+    <p class="meta">node: OCI A1.Flex &ldquo;louis2&rdquo; · 92.5.135.46 · OL9 arm64 · k3s + Traefik &nbsp;|&nbsp; as of 2026-07-26</p>
+  </header>
+
+  <div class="diagram">
+    <svg viewBox="0 0 1200 1060" role="img" aria-label="Infrastructure topology diagram" preserveAspectRatio="xMidYMin meet">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+        </marker>
+      </defs>
+
+      <!-- ===== External layer ===== -->
+      <rect class="box b-ext" x="500" y="18" width="200" height="48" rx="24"/>
+      <text class="t title" x="600" y="48" text-anchor="middle">Internet</text>
+
+      <rect class="box b-ext" x="450" y="96" width="300" height="66" rx="12"/>
+      <text class="t title" x="600" y="124" text-anchor="middle" font-size="15">Cloudflare DNS</text>
+      <text class="t mono" x="600" y="146" text-anchor="middle">lans-h.cc · *.lans-h.cc &nbsp;(reg: Spaceship)</text>
+
+      <!-- Internet -> Cloudflare -->
+      <path class="edge" d="M600,66 L600,94" marker-end="url(#arrow)"/>
+
+      <!-- Cloudflare -> Traefik (443) and -> webhook (9000) -->
+      <path class="edge" d="M560,162 C500,215 440,235 400,286" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="452" y="212" text-anchor="middle">TCP 80/443 · HTTPS</text>
+      <path class="edge" d="M660,162 C760,210 880,235 945,286" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="835" y="210" text-anchor="middle">TCP 9000 · HTTP+HMAC</text>
+
+      <!-- ===== Node container ===== -->
+      <rect class="container" x="40" y="188" width="1120" height="852" rx="16"/>
+      <rect class="tab" x="40" y="188" width="404" height="52" rx="16"/>
+      <text class="t" x="60" y="211" font-size="13" font-weight="700">OCI A1.Flex · louis2 · 92.5.135.46</text>
+      <text class="t sub" x="60" y="230" font-size="12">OL9 arm64 · single-node k3s (Traefik enabled, kubeconfig 644)</text>
+
+      <!-- ===== Ingress row ===== -->
+      <rect class="box b-infra" x="70" y="286" width="640" height="74" rx="12"/>
+      <text class="t title" x="90" y="316" font-size="15">Traefik &nbsp;:80 / :443</text>
+      <text class="t sub" x="90" y="340">wildcard <tspan class="mono">*.lans-h.cc</tspan> = default cert · <tspan class="mono">Host(...)</tspan> routing · no per-app TLS block</text>
+
+      <rect class="box b-infra" x="760" y="286" width="370" height="74" rx="12"/>
+      <text class="t title" x="780" y="316" font-size="15">adnanh/webhook &nbsp;:9000</text>
+      <text class="t sub" x="780" y="340">plain HTTP · HMAC <tspan class="mono">X-Hub-Signature-256</tspan></text>
+
+      <!-- Traefik -> app boxes -->
+      <path class="edge" d="M180,360 L180,406" marker-end="url(#arrow)"/>
+      <path class="edge" d="M440,360 L455,406" marker-end="url(#arrow)"/>
+      <path class="edge" d="M660,360 L700,406" marker-end="url(#arrow)"/>
+
+      <!-- ===== App namespace row (y=410 h=190) ===== -->
+      <!-- default / my_website -->
+      <rect class="box b-app" x="70" y="410" width="250" height="190" rx="12"/>
+      <text class="t nslabel" x="88" y="436">ns: web</text>
+      <text class="t title" x="88" y="462" font-size="15">my_website</text>
+      <text class="t sub" x="88" y="484">Astro static site · <tspan class="mono">lans-h-site</tspan></text>
+      <text class="t sub" x="88" y="503">Host: <tspan class="mono">lans-h.cc</tspan> (+www 301)</text>
+      <text class="t mono" x="88" y="522">img: localhost/lans-h-site</text>
+      <a class="live" href="https://lans-h.cc" target="_blank" rel="noopener">
+        <rect class="live-pill" x="88" y="536" width="96" height="26" rx="13"/>
+        <text class="live-txt" x="136" y="554" text-anchor="middle">LIVE ↗</text>
+      </a>
+
+      <!-- gelp -->
+      <rect class="box b-app" x="340" y="410" width="250" height="190" rx="12"/>
+      <text class="t nslabel" x="358" y="436">ns: gelp</text>
+      <text class="t title" x="358" y="462" font-size="15">gelp</text>
+      <text class="t sub" x="358" y="484">Next.js app</text>
+      <text class="t sub" x="358" y="503">Host: <tspan class="mono">gelp.lans-h.cc</tspan></text>
+      <text class="t mono" x="358" y="522">img: localhost/gelp</text>
+      <a class="live" href="https://gelp.lans-h.cc" target="_blank" rel="noopener">
+        <rect class="live-pill" x="358" y="536" width="96" height="26" rx="13"/>
+        <text class="live-txt" x="406" y="554" text-anchor="middle">LIVE ↗</text>
+      </a>
+
+      <!-- transigen -->
+      <rect class="box b-app" x="610" y="410" width="250" height="190" rx="12"/>
+      <text class="t nslabel" x="628" y="436">ns: transigen</text>
+      <text class="t title" x="628" y="462" font-size="15">transigen</text>
+      <text class="t sub" x="628" y="484">Next.js app</text>
+      <text class="t sub" x="628" y="503">Host: <tspan class="mono">transigen.lans-h.cc</tspan></text>
+      <text class="t mono" x="628" y="522">img: localhost/transigen</text>
+      <a class="live" href="https://transigen.lans-h.cc" target="_blank" rel="noopener">
+        <rect class="live-pill" x="628" y="536" width="96" height="26" rx="13"/>
+        <text class="live-txt" x="676" y="554" text-anchor="middle">LIVE ↗</text>
+      </a>
+
+      <!-- snoopy -->
+      <rect class="box b-app" x="880" y="410" width="250" height="190" rx="12"/>
+      <text class="t nslabel" x="898" y="436">ns: snoopy</text>
+      <text class="t title" x="898" y="462" font-size="15">snoopy</text>
+      <text class="t sub" x="898" y="484">Telegram/chat bot</text>
+      <text class="t sub" x="898" y="503">no Ingress · zero-inbound</text>
+      <text class="t mono" x="898" y="522">img: localhost/snoopy</text>
+      <rect class="box b-strip" x="898" y="536" width="150" height="26" rx="13"/>
+      <text class="t sub" x="973" y="554" text-anchor="middle" font-size="11">internal only</text>
+
+      <!-- app -> data edges (left three depend on Postgres) -->
+      <path class="edge" d="M170,600 L230,636" marker-end="url(#arrow)"/>
+      <path class="edge" d="M430,600 L400,636" marker-end="url(#arrow)"/>
+      <path class="edge" d="M700,600 L560,636" marker-end="url(#arrow)"/>
+
+      <!-- ===== Data + platform row (y=640 h=118) ===== -->
+      <rect class="box b-data" x="70" y="640" width="640" height="118" rx="12"/>
+      <text class="t nslabel" x="90" y="666" fill="var(--data-bd)">ns: data</text>
+      <text class="t title" x="90" y="690" font-size="15">Shared Postgres</text>
+      <text class="t sub" x="90" y="712">per-app <tspan class="mono">&lt;app&gt;_rw</tspan> least-privilege roles · db-per-app</text>
+      <text class="t sub" x="90" y="732"><tspan class="mono">PUBLIC</tspan> connect revoked · no TLS (traffic never leaves the node)</text>
+
+      <rect class="box b-platform" x="760" y="640" width="370" height="118" rx="12"/>
+      <text class="t nslabel" x="780" y="666" fill="var(--platform-bd)">ns: platform</text>
+      <text class="t title" x="780" y="690" font-size="15">Cluster plumbing</text>
+      <text class="t sub" x="780" y="712">cert-manager + Cloudflare DNS-01 issuer</text>
+      <text class="t sub" x="780" y="731"><tspan class="mono">*.lans-h.cc</tspan> wildcard cert · TLSStore</text>
+      <text class="t sub" x="780" y="750">www → apex 301 redirect</text>
+
+      <!-- ===== Build model strip ===== -->
+      <rect class="box b-strip" x="70" y="792" width="1060" height="66" rx="12"/>
+      <text class="t title" x="90" y="820" font-size="14">Image build model — no registry</text>
+      <text class="t sub" x="90" y="842">podman build <tspan class="mono">on the node</tspan> → import into k3s containerd → Deployments use <tspan class="mono">imagePullPolicy: Never</tspan> with <tspan class="mono">localhost/&lt;app&gt;</tspan> names</text>
+
+      <!-- ===== Deploy triggers strip ===== -->
+      <rect class="box b-strip" x="70" y="882" width="1060" height="140" rx="12"/>
+      <text class="t title" x="90" y="910" font-size="14">Deploy triggers (per-app, by choice)</text>
+      <text class="t sub" x="90" y="936"><tspan class="mono" fill="var(--fg)">snoopy</tspan> &nbsp;&nbsp;push <tspan class="mono">v*</tspan> tag → GitHub Actions (pytest) → SSH into node → build + rollout &nbsp;&nbsp;<tspan fill="var(--accent)">release-gate: v* tag</tspan></text>
+      <text class="t sub" x="90" y="960"><tspan class="mono" fill="var(--fg)">gelp</tspan> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;push main → Actions <tspan class="mono">next build</tspan> → HMAC curl <tspan class="mono">:9000/hooks/deploy-gelp</tspan> &nbsp;&nbsp;<tspan fill="var(--accent)">test-gate: build must pass (route A)</tspan></text>
+      <text class="t sub" x="90" y="984"><tspan class="mono" fill="var(--fg)">transigen</tspan> push main → Actions <tspan class="mono">next build</tspan> → HMAC curl <tspan class="mono">:9000/hooks/deploy-transigen</tspan> &nbsp;&nbsp;<tspan fill="var(--accent)">test-gate: build must pass (route A)</tspan></text>
+      <text class="t sub" x="90" y="1008"><tspan class="mono" fill="var(--fg)">my_website</tspan> push main → native GitHub webhook → <tspan class="mono">:9000/hooks/deploy-my_website</tspan> &nbsp;&nbsp;<tspan fill="var(--muted)">no gate (static site)</tspan></text>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <div class="card">
+      <h3>What this repo owns</h3>
+      <p>The <code>platform</code> repo is the single source of truth for shared infrastructure: the node, single-node k3s, Traefik, the wildcard cert, the shared Postgres, and the <code>:9000</code> webhook listener. App repos own their own build + deploy — only what two or more apps stand on lives here.</p>
+    </div>
+
+    <div class="card">
+      <h3>Two orthogonal gate axes</h3>
+      <table>
+        <tr><th>Axis</th><th>Meaning</th><th>Who has it</th></tr>
+        <tr><td>test-gate</td><td>build/tests must pass before deploy</td><td>gelp, transigen (route A), snoopy (pytest)</td></tr>
+        <tr><td>release-gate</td><td>only a <code>v*</code> tag ships</td><td>snoopy only</td></tr>
+      </table>
+      <p class="note">The tag-gate flip for gelp/transigen is optional and not yet done; my_website is a static site with no gate.</p>
+    </div>
+
+    <div class="card">
+      <h3>TLS &amp; security posture</h3>
+      <ul>
+        <li>Wildcard cert is Traefik's <b>default cert</b> — app Ingresses carry no <code>tls:</code> block; a <code>Host(...)</code> rule is all they declare.</li>
+        <li><code>:9000</code> webhook is <b>plain HTTP</b>; security is the HMAC secret, never TLS.</li>
+        <li>Postgres runs with <b>no TLS by design</b> — traffic never leaves the trusted node/cluster network.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>Live endpoints</h3>
+      <table>
+        <tr><th>App</th><th>URL</th><th></th></tr>
+        <tr><td>my_website</td><td><code>lans-h.cc</code></td><td><a class="pill" href="https://lans-h.cc" target="_blank" rel="noopener">open ↗</a></td></tr>
+        <tr><td>gelp</td><td><code>gelp.lans-h.cc</code></td><td><a class="pill" href="https://gelp.lans-h.cc" target="_blank" rel="noopener">open ↗</a></td></tr>
+        <tr><td>transigen</td><td><code>transigen.lans-h.cc</code></td><td><a class="pill" href="https://transigen.lans-h.cc" target="_blank" rel="noopener">open ↗</a></td></tr>
+        <tr><td>snoopy</td><td>zero-inbound bot</td><td>—</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p class="foot">Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>. Migration log: <code>learning/platform-migration-2026-07-24.md</code>. &nbsp; my_website (lans-h-site) runs in the <code>web</code> namespace (moved out of <code>default</code> on 2026-07-26).</p>
+</div>
+</body>
+</html>

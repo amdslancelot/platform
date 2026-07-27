@@ -1,8 +1,7 @@
 # All namespaces on the shared node, created by platform (apps assume theirs
 # exists). `data` is created in data-postgres/postgres.yaml alongside the
-# server it hosts. my_website currently deploys to `default` (its manifests
-# predate namespacing) — moving it to a `web` namespace is a pending cleanup,
-# tracked in docs/runbook.md.
+# server it hosts. my_website (lans-h-site) lives in `web`; it was moved out of
+# `default` on 2026-07-26 (its manifests originally predated namespacing).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -22,3 +21,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: transigen
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web           # my_website / lans-h-site (apex lans-h.cc + www 301)
