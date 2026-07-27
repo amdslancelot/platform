@@ -233,6 +233,38 @@ add). `[public]` / `[internal]` marks where the two versions differ.
 
 ---
 
+### 2.9 Off-cluster analysis worker (transigen) — verified state
+
+*叢集外分析 worker(transigen)—— 查證後的現況*
+
+- **Verified fact (from the repos):** transigen's Python worker (yt-dlp +
+  librosa) has **never been deployed** — `deploy/` ships no worker manifest, and
+  the webhook only rebuilds the app image. Its one working wiring is
+  `worker/.env.example` → <code>port-forward :54321</code> to the **staging**
+  (minikube) `data` Postgres; it polls <code>ingest_jobs</code> every 5s. There is
+  **no** "prod worker → prod Postgres" line, so prod analysis is effectively
+  inactive.
+  *查證事實(取自 repo):transigen 的 Python worker(yt-dlp + librosa)**從未部署** ——
+  `deploy/` 沒有任何 worker manifest,webhook 只 rebuild app image。它唯一跑通的接線是
+  `worker/.env.example` → `port-forward :54321` 連到 **staging**(minikube)的 `data`
+  Postgres,每 5 秒輪詢 `ingest_jobs`。**沒有**「prod worker → prod Postgres」這條線,
+  所以 prod 的分析功能等於未啟用。*
+- **How it's drawn:** worker appears only in the **staging** environment, with an
+  outbound poll arrow into the staging Postgres (worker dials out; nothing points
+  into the host). Prod shows no worker. Pull, not push — which is exactly why a
+  laptop behind residential NAT can serve it without any inbound.
+  *畫法:worker 只出現在 **staging** 環境,一條 outbound poll 箭頭指向 staging Postgres
+  (worker 主動 dial-out;沒有任何線指進本機)。prod 不畫 worker。是 pull 不是 push ——
+  這正是住宅 NAT 後的筆電能承接它、卻不需任何 inbound 的原因。*
+- **Open decision / 待定取捨:** local worker + self-opened tunnel (SSH to the OCI
+  node, or port-forward with the OCI kubeconfig) vs. deploying the worker onto OCI
+  (drops the tunnel) — the latter is gated on first testing whether a datacenter
+  IP trips YouTube's bot-check, which is the original reason the worker runs on a
+  residential IP. Unsettled.
+  *待定取捨:本機 worker + 自開 tunnel(SSH 到 OCI 節點,或用 OCI kubeconfig 做
+  port-forward)vs. 把 worker 部署上 OCI(免 tunnel)—— 後者要先實測 OCI datacenter
+  IP 會不會被 YouTube bot-check 擋(這正是 worker 跑住宅 IP 的原因)。尚未定案。*
+
 ## 3. What changes in each version
 
 *每一版會怎麼改*

@@ -102,7 +102,7 @@
   </header>
 
   <div class="diagram">
-    <svg viewBox="0 0 1200 1360" role="img" aria-label="Infrastructure topology diagram" preserveAspectRatio="xMidYMin meet">
+    <svg viewBox="0 0 1200 1480" role="img" aria-label="Infrastructure topology diagram" preserveAspectRatio="xMidYMin meet">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
@@ -230,7 +230,7 @@
       <text class="edge-lbl" x="612" y="1061" text-anchor="start">promote → prod</text>
 
       <!-- ===== Staging environment ===== -->
-      <rect class="container" x="40" y="1072" width="1120" height="256" rx="16"/>
+      <rect class="container" x="40" y="1072" width="1120" height="380" rx="16"/>
       <rect class="tab" x="40" y="1072" width="440" height="52" rx="16"/>
       <text class="t" x="60" y="1095" font-size="13" font-weight="700">STAGING · local minikube (Mac)</text>
       <text class="t sub" x="60" y="1114" font-size="12">mirrors prod — same manifests, dev image builds</text>
@@ -252,6 +252,14 @@
       <text class="t sub" x="810" y="1204">Argo CD — pull &amp; reconcile</text>
       <text class="t sub" x="810" y="1224">self-heal / anti-drift</text>
       <text class="t sub" x="810" y="1244">replaces push-to-deploy</text>
+
+      <!-- staging: off-cluster analysis worker (transigen) -->
+      <rect class="box b-strip" x="430" y="1338" width="340" height="98" rx="12"/>
+      <text class="t title" x="450" y="1366" font-size="14">Analysis worker · host process</text>
+      <text class="t sub" x="450" y="1388">Python (yt-dlp + librosa) · polls <tspan class="mono">ingest_jobs</tspan> (5s)</text>
+      <text class="t sub" x="450" y="1408"><tspan class="mono">port-forward :54321 → data</tspan> · residential IP, not deployed</text>
+      <path class="edge" style="stroke-dasharray:4 4" d="M600,1338 L600,1302" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="612" y="1324" text-anchor="start">poll (port-forward)</text>
     </svg>
   </div>
 
@@ -301,6 +309,7 @@
     <div class="card"><h3>Shared Postgres, least-privilege per app</h3><p>One server is a shared resource — <b>but</b> a per-app <code>&lt;app&gt;_rw</code> role scoped to its own database (with <code>PUBLIC</code> connect revoked) gives real isolation without N database servers. Provisioning is additive. No TLS by design — DB traffic never leaves the node.</p></div>
     <div class="card"><h3>Trigger and gate, decoupled</h3><p>Per-app triggers (Actions-SSH / CI→webhook / native webhook) look inconsistent — <b>but</b> each app keeps the trigger that fits it while sharing one <code>:9000</code> HMAC-signed webhook. <b>Trigger</b> is separate from <b>gate</b> (test-gate = build must pass; release-gate = <code>v*</code> tag) — two axes mixed per app.</p></div>
     <div class="card"><h3>Push now, GitOps later</h3><p>Push-to-deploy is imperative and can drift; GitOps self-heals and resists drift but adds a controller, a registry, and complexity. Prove it in the local minikube mirror (where a reset makes mistakes free), then promote — deliberate sequencing, not an absence of the idea.</p></div>
+    <div class="card"><h3>Where the analysis worker runs</h3><p>transigen's Python worker runs locally (residential IP) and reaches Postgres via <code>port-forward</code> to the staging <code>data</code> plane — it has never run against prod, and <code>deploy/</code> ships no worker manifest. Deploying it to the cluster would drop the tunnel, but must first clear whether a datacenter IP trips YouTube's bot-check (the original reason it runs local). Open decision.</p></div>
   </div>
 
   <p class="foot">A reusable platform layer — one shared single-node k3s cluster, one wildcard-TLS domain, one signed deploy webhook — that any number of apps can stand on. Onboarding the next app is additive: a namespace, a <code>Host(...)</code> rule, a database role, one hook. A local minikube cluster mirrors the setup for dev/staging and is the lab for a future GitOps (Argo CD) model. &nbsp; Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>; migration log: <code>learning/platform-migration-2026-07-24.md</code>.</p>
