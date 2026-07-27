@@ -85,18 +85,24 @@
   ul{margin:6px 0 0;padding-left:18px}
   li{margin:3px 0}
   .foot{color:var(--muted);font-size:12.5px;margin-top:28px;border-top:1px solid var(--border);padding-top:12px}
+  .lede{max-width:980px;margin:14px 0 2px;font-size:15px;line-height:1.6}
+  .lede b{font-weight:700}
+  .section-h{font-size:18px;margin:38px 0 0}
+  .why .card p{margin:0;font-size:13.5px;color:var(--muted)}
+  .why .card b{color:var(--fg)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="doc">
     <h1>lans-h.cc fleet — infrastructure topology</h1>
-    <p class="sub">Four workloads on one shared single-node k3s cluster</p>
-    <p class="meta">node: OCI A1.Flex &ldquo;louis2&rdquo; · 92.5.135.46 · OL9 arm64 · k3s + Traefik &nbsp;|&nbsp; as of 2026-07-26</p>
+    <p class="sub">A reusable platform layer — four workloads today, additive onboarding for the next</p>
+    <p class="lede">A ground-up re-imagining of platform infrastructure: what I'd build if the platform were mine to design, drawing on 10+ years of engineering. The platform owns <b>everything two or more apps stand on</b>; each app declares only its own thin slice — a namespace, a <code>Host(...)</code> rule, a database role, and one deploy hook.</p>
+    <p class="meta">prod node: OCI A1.Flex &ldquo;louis2&rdquo; · 92.5.135.46 · OL9 arm64 · single-node k3s + Traefik &nbsp;|&nbsp; as of 2026-07-26</p>
   </header>
 
   <div class="diagram">
-    <svg viewBox="0 0 1200 1060" role="img" aria-label="Infrastructure topology diagram" preserveAspectRatio="xMidYMin meet">
+    <svg viewBox="0 0 1200 1360" role="img" aria-label="Infrastructure topology diagram" preserveAspectRatio="xMidYMin meet">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
@@ -218,6 +224,34 @@
       <text class="t sub" x="90" y="960"><tspan class="mono" fill="var(--fg)">gelp</tspan> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;push main → Actions <tspan class="mono">next build</tspan> → HMAC curl <tspan class="mono">:9000/hooks/deploy-gelp</tspan> &nbsp;&nbsp;<tspan fill="var(--accent)">test-gate: build must pass (route A)</tspan></text>
       <text class="t sub" x="90" y="984"><tspan class="mono" fill="var(--fg)">transigen</tspan> push main → Actions <tspan class="mono">next build</tspan> → HMAC curl <tspan class="mono">:9000/hooks/deploy-transigen</tspan> &nbsp;&nbsp;<tspan fill="var(--accent)">test-gate: build must pass (route A)</tspan></text>
       <text class="t sub" x="90" y="1008"><tspan class="mono" fill="var(--fg)">my_website</tspan> push main → native GitHub webhook → <tspan class="mono">:9000/hooks/deploy-my_website</tspan> &nbsp;&nbsp;<tspan fill="var(--muted)">no gate (static site)</tspan></text>
+
+      <!-- prod <- staging promote connector -->
+      <path class="edge" style="stroke-dasharray:5 4" d="M600,1072 L600,1042" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="612" y="1061" text-anchor="start">promote → prod</text>
+
+      <!-- ===== Staging environment ===== -->
+      <rect class="container" x="40" y="1072" width="1120" height="256" rx="16"/>
+      <rect class="tab" x="40" y="1072" width="440" height="52" rx="16"/>
+      <text class="t" x="60" y="1095" font-size="13" font-weight="700">STAGING · local minikube (Mac)</text>
+      <text class="t sub" x="60" y="1114" font-size="12">mirrors prod — same manifests, dev image builds</text>
+
+      <rect class="box b-app" x="70" y="1150" width="340" height="150" rx="12"/>
+      <text class="t title" x="90" y="1180" font-size="15">Same topology as prod</text>
+      <text class="t sub" x="90" y="1204">identical namespaces + Ingress rules</text>
+      <text class="t sub" x="90" y="1224">dev image builds (<tspan class="mono">minikube image load</tspan>)</text>
+      <text class="t sub" x="90" y="1244">promoted to prod once green</text>
+
+      <rect class="box b-data" x="430" y="1150" width="340" height="150" rx="12"/>
+      <text class="t title" x="450" y="1180" font-size="15">Shared Postgres (dev)</text>
+      <text class="t sub" x="450" y="1204">local Postgres in the <tspan class="mono">data</tspan> ns</text>
+      <text class="t sub" x="450" y="1224">isolated dev database per app</text>
+      <text class="t sub" x="450" y="1244">same <tspan class="mono">&lt;app&gt;_rw</tspan> least-privilege roles</text>
+
+      <rect class="box b-platform" x="790" y="1150" width="340" height="150" rx="12"/>
+      <text class="t title" x="810" y="1180" font-size="15">Future: GitOps lab</text>
+      <text class="t sub" x="810" y="1204">Argo CD — pull &amp; reconcile</text>
+      <text class="t sub" x="810" y="1224">self-heal / anti-drift</text>
+      <text class="t sub" x="810" y="1244">replaces push-to-deploy</text>
     </svg>
   </div>
 
@@ -258,7 +292,18 @@
     </div>
   </div>
 
-  <p class="foot">Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>. Migration log: <code>learning/platform-migration-2026-07-24.md</code>. &nbsp; my_website (lans-h-site) runs in the <code>web</code> namespace (moved out of <code>default</code> on 2026-07-26).</p>
+  <h2 class="section-h">Why it's built this way — design trade-offs</h2>
+  <div class="legend why">
+    <div class="card"><h3>One shared cluster</h3><p>A single-node cluster is one failure domain with no HA — <b>but</b> it removes per-app cluster cost and ops entirely and forces clean multi-tenancy (namespaces + per-app DB roles). The tenancy contract scales to more nodes without changing the app contract.</p></div>
+    <div class="card"><h3>Platform repo = source of truth</h3><p>Shared infra used to squat in whichever app repo needed it first (Postgres in one app, cert-manager buried in another's deploy script) → duplication and unclear ownership. Centralizing it draws a hard platform/app boundary: apps stay thin and onboarding is self-service.</p></div>
+    <div class="card"><h3>No image registry</h3><p>Build on the node and import into k3s containerd (<code>imagePullPolicy: Never</code>, <code>localhost/&lt;app&gt;</code> so containerd never normalizes to <code>docker.io/library</code> and pulls). No registry to run, secure, or pay for and no pull credentials. A registry (GHCR) can slot in later with no app change.</p></div>
+    <div class="card"><h3>Wildcard = Traefik's default cert</h3><p>One wildcard means a bigger blast radius and no per-app cert policy — <b>but</b> apps declare zero TLS config (no <code>tls:</code> block) and every new subdomain gets valid TLS automatically. TLS becomes a platform concern, not an app concern.</p></div>
+    <div class="card"><h3>Shared Postgres, least-privilege per app</h3><p>One server is a shared resource — <b>but</b> a per-app <code>&lt;app&gt;_rw</code> role scoped to its own database (with <code>PUBLIC</code> connect revoked) gives real isolation without N database servers. Provisioning is additive. No TLS by design — DB traffic never leaves the node.</p></div>
+    <div class="card"><h3>Trigger and gate, decoupled</h3><p>Per-app triggers (Actions-SSH / CI→webhook / native webhook) look inconsistent — <b>but</b> each app keeps the trigger that fits it while sharing one <code>:9000</code> HMAC-signed webhook. <b>Trigger</b> is separate from <b>gate</b> (test-gate = build must pass; release-gate = <code>v*</code> tag) — two axes mixed per app.</p></div>
+    <div class="card"><h3>Push now, GitOps later</h3><p>Push-to-deploy is imperative and can drift; GitOps self-heals and resists drift but adds a controller, a registry, and complexity. Prove it in the local minikube mirror (where a reset makes mistakes free), then promote — deliberate sequencing, not an absence of the idea.</p></div>
+  </div>
+
+  <p class="foot">A reusable platform layer — one shared single-node k3s cluster, one wildcard-TLS domain, one signed deploy webhook — that any number of apps can stand on. Onboarding the next app is additive: a namespace, a <code>Host(...)</code> rule, a database role, one hook. A local minikube cluster mirrors the setup for dev/staging and is the lab for a future GitOps (Argo CD) model. &nbsp; Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>; migration log: <code>learning/platform-migration-2026-07-24.md</code>.</p>
 </div>
 </body>
 </html>
