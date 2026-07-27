@@ -18,13 +18,25 @@ angle, I apply it to both HTML versions (public/interview + internal canonical).
 *定位 — 重新框架*
 
 **Framing concept:** this is a **ground-up re-imagining of platform
-infrastructure** — what I'd build if the platform were mine to design, drawing
-on **10+ years of engineering**. Not "here are my hobby apps"; it's a considered
-take on the platform/app contract, shown at small scale.
+infrastructure** — how I'd design one, drawing on **10+ years of engineering**.
+Deliberately a **minimum viable platform (MVP)**: the smallest build that proves
+the pattern, with a clear upgrade path. Not "here are my hobby apps"; it's a
+considered take on the platform/app contract, shown at small scale.
 
 *框架概念:這是一次**從頭 re-imagine platform infrastructure** —— 以 **10+ 年工作
-經驗**,設想「如果這個 platform 是我自己來設計,會怎麼設計」。不是「這是我的興趣小專案」,
-而是對 platform/app 契約的深思熟慮版本,只是以小規模呈現。*
+經驗**設想「如果 platform 是我自己來設計,會怎麼設計」。刻意做成 **minimum viable
+platform(MVP)**:用最小的實作把模式跑通,並留清楚的升級路徑。不是「興趣小專案」,而是
+對 platform/app 契約的深思熟慮版本,只是以小規模呈現。*
+
+**Public-copy rule / 公開版文案原則:** describe by what a thing **is / has**,
+never by what it lacks — e.g. snoopy is a "Discord bot / in-app", not a
+"zero-inbound bot". Trade-off cards may still name a trade-off, but lead with the
+choice and its benefit, not the deficit. `[public]` only; the internal version
+keeps precise negatives (`no TLS by design`, etc.).
+*公開版文案原則:用「它是什麼 / 有什麼」來描述,絕不用「它缺什麼」—— 例如 snoopy 寫
+「Discord bot / in-app」,不是「zero-inbound bot」。取捨卡片仍可點出 trade-off,但先講
+選擇與好處、不以缺點開頭。僅限 `[public]`;內部版保留精確的負向描述(如 `no TLS by
+design`)。*
 
 **Old angle (avoid):** "I run four of my apps on one box."
 **New angle:** "I built a small **platform layer** that any number of apps can
