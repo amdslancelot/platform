@@ -82,7 +82,7 @@
   .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
     background:var(--live);color:var(--live-fg);text-decoration:none}
   .note{color:var(--muted);font-size:12.5px;margin-top:6px}
-  ul{margin:6px 0 0;padding-left:18px}
+  ul,ol{margin:6px 0 0;padding-left:18px}
   li{margin:3px 0}
   .foot{color:var(--muted);font-size:12.5px;margin-top:28px;border-top:1px solid var(--border);padding-top:12px}
   .lede{max-width:980px;margin:14px 0 2px;font-size:15px;line-height:1.6}
@@ -163,7 +163,7 @@
       <rect class="box b-app" x="340" y="410" width="250" height="190" rx="12"/>
       <text class="t nslabel" x="358" y="436">ns: gelp</text>
       <text class="t title" x="358" y="462" font-size="15">gelp</text>
-      <text class="t sub" x="358" y="484">Next.js app</text>
+      <text class="t sub" x="358" y="484">Next.js 15 · Drizzle · Leaflet</text>
       <text class="t sub" x="358" y="503">Host: <tspan class="mono">gelp.lans-h.cc</tspan></text>
       <text class="t mono" x="358" y="522">img: localhost/gelp</text>
       <a class="live" href="https://gelp.lans-h.cc" target="_blank" rel="noopener">
@@ -175,7 +175,7 @@
       <rect class="box b-app" x="610" y="410" width="250" height="190" rx="12"/>
       <text class="t nslabel" x="628" y="436">ns: transigen</text>
       <text class="t title" x="628" y="462" font-size="15">transigen</text>
-      <text class="t sub" x="628" y="484">Next.js app</text>
+      <text class="t sub" x="628" y="484">Next.js 15 · React 19 · SSE</text>
       <text class="t sub" x="628" y="503">Host: <tspan class="mono">transigen.lans-h.cc</tspan></text>
       <text class="t mono" x="628" y="522">img: localhost/transigen</text>
       <a class="live" href="https://transigen.lans-h.cc" target="_blank" rel="noopener">
@@ -270,6 +270,12 @@
     </div>
 
     <div class="card">
+      <h3>Onboard a new app — 4 steps</h3>
+      <ol><li><code>kubectl create ns &lt;app&gt;</code></li><li>a <code>Host(...)</code> Ingress rule (wildcard cert covers it)</li><li><code>PROVISION_APPS=&lt;app&gt;</code> (additive, idempotent)</li><li>a hook in <code>webhook/hooks.json</code></li></ol>
+      <p class="note">Additive throughout; the next app needs no cluster-wide change.</p>
+    </div>
+
+    <div class="card">
       <h3>Two orthogonal gate axes</h3>
       <table>
         <tr><th>Axis</th><th>Meaning</th><th>Who has it</th></tr>
@@ -306,10 +312,15 @@
     <div class="card"><h3>Platform repo = source of truth</h3><p>Shared infra used to squat in whichever app repo needed it first (Postgres in one app, cert-manager buried in another's deploy script) → duplication and unclear ownership. Centralizing it draws a hard platform/app boundary: apps stay thin and onboarding is self-service.</p></div>
     <div class="card"><h3>No image registry</h3><p>Build on the node and import into k3s containerd (<code>imagePullPolicy: Never</code>, <code>localhost/&lt;app&gt;</code> so containerd never normalizes to <code>docker.io/library</code> and pulls). No registry to run, secure, or pay for and no pull credentials. A registry (GHCR) can slot in later with no app change.</p></div>
     <div class="card"><h3>Wildcard = Traefik's default cert</h3><p>One wildcard means a bigger blast radius and no per-app cert policy — <b>but</b> apps declare zero TLS config (no <code>tls:</code> block) and every new subdomain gets valid TLS automatically. TLS becomes a platform concern, not an app concern.</p></div>
-    <div class="card"><h3>Shared Postgres, least-privilege per app</h3><p>One server is a shared resource — <b>but</b> a per-app <code>&lt;app&gt;_rw</code> role scoped to its own database (with <code>PUBLIC</code> connect revoked) gives real isolation without N database servers. Provisioning is additive. No TLS by design — DB traffic never leaves the node.</p></div>
+    <div class="card"><h3>Shared Postgres, least-privilege per app</h3><p>One server is a shared resource — <b>but</b> a per-app <code>&lt;app&gt;_rw</code> login-only role scoped to its own database (<code>PUBLIC</code> connect revoked; no <code>SUPERUSER</code>/<code>CREATEDB</code>/<code>CREATEROLE</code>) gives real isolation without N database servers. Provisioning is additive, idempotent, and self-verifying — the script asserts the isolation at the end. No TLS by design — DB traffic never leaves the node.</p></div>
     <div class="card"><h3>Trigger and gate, decoupled</h3><p>Per-app triggers (Actions-SSH / CI→webhook / native webhook) look inconsistent — <b>but</b> each app keeps the trigger that fits it while sharing one <code>:9000</code> HMAC-signed webhook. <b>Trigger</b> is separate from <b>gate</b> (test-gate = build must pass; release-gate = <code>v*</code> tag) — two axes mixed per app.</p></div>
     <div class="card"><h3>Push now, GitOps later</h3><p>Push-to-deploy is imperative and can drift; GitOps self-heals and resists drift but adds a controller, a registry, and complexity. Prove it in the local minikube mirror (where a reset makes mistakes free), then promote — deliberate sequencing, not an absence of the idea.</p></div>
-    <div class="card"><h3>Where the analysis worker runs</h3><p>transigen's Python worker runs locally (residential IP) and reaches Postgres via <code>port-forward</code> to the staging <code>data</code> plane — it has never run against prod, and <code>deploy/</code> ships no worker manifest. Deploying it to the cluster would drop the tunnel, but must first clear whether a datacenter IP trips YouTube's bot-check (the original reason it runs local). Open decision.</p></div>
+  </div>
+
+  <h2 class="section-h">Open decisions &amp; what's next</h2>
+  <div class="legend">
+    <div class="card"><h3>Open decision — where the analysis worker runs</h3><p>transigen's Python worker runs locally (residential IP) and reaches Postgres via <code>port-forward</code> to the staging <code>data</code> plane — it has never run against prod, and <code>deploy/</code> ships no worker manifest. Deploying it to the cluster would drop the tunnel, but must first clear whether a datacenter IP trips YouTube's bot-check (the original reason it runs local). Deliberately unsettled.</p></div>
+    <div class="card"><h3>What's next</h3><ul><li>Backup/restore for the shared Postgres — today the biggest single point of failure.</li><li>GitOps (Argo CD/Flux) for declarative rollbacks, replacing the webhook.</li><li>A real secret store instead of <code>.env</code> → Secret at deploy time.</li></ul></div>
   </div>
 
   <p class="foot">A reusable platform layer — one shared single-node k3s cluster, one wildcard-TLS domain, one signed deploy webhook — that any number of apps can stand on. Onboarding the next app is additive: a namespace, a <code>Host(...)</code> rule, a database role, one hook. A local minikube cluster mirrors the setup for dev/staging and is the lab for a future GitOps (Argo CD) model. &nbsp; Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>; migration log: <code>learning/platform-migration-2026-07-24.md</code>.</p>
