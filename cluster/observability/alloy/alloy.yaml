@@ -1,0 +1,207 @@
+# Grafana Alloy — the fleet's metrics collector. It scrapes every on-node
+# source and remote_writes the samples OFF the node to Grafana Cloud, so the
+# 2-OCPU/12GB node keeps NONE of the TSDB/query/dashboard load (the whole point
+# of the offload design — the monitor must not compete with what it monitors).
+#
+# The Alloy config lives in the ConfigMap below (single source of truth); the
+# Grafana Cloud credentials come from the `grafana-cloud` Secret, created
+# out-of-band (see runbook) so no API key is committed to git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: observability
+data:
+  config.alloy: |
+    // -----------------------------------------------------------------------
+    // Fleet observability collector. Sources -> Grafana Cloud remote_write.
+    //   kubelet + cAdvisor   -> per-app CPU / RAM / disk-I/O (by namespace/pod)
+    //   node-exporter        -> host disk space + image/log textfile metrics
+    //   postgres-exporter    -> per-app DB size, connections, cache/tx
+    // -----------------------------------------------------------------------
+    logging { level = "info" }
+
+    // -- Grafana Cloud sink (creds injected from the grafana-cloud Secret) --
+    prometheus.remote_write "grafanacloud" {
+      endpoint {
+        url = sys.env("GRAFANA_CLOUD_PROM_URL")
+        basic_auth {
+          username = sys.env("GRAFANA_CLOUD_PROM_USER")
+          password = sys.env("GRAFANA_CLOUD_PROM_PASSWORD")
+        }
+      }
+      // Tag every series with the node so multi-source panels line up.
+      external_labels = { cluster = "louis2", fleet = "lans-h-cc" }
+    }
+
+    // -- Node discovery -----------------------------------------------------
+    discovery.kubernetes "nodes" { role = "node" }
+
+    // kubelet + cAdvisor are scraped straight off the node InternalIP:10250.
+    discovery.relabel "kubelet" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+        target_label  = "__address__"
+        regex         = "(.+)"
+        replacement   = "${1}:10250"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "kubelet" {
+      targets           = discovery.relabel.kubelet.output
+      job_name          = "kubelet"
+      scheme            = "https"
+      metrics_path      = "/metrics"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // cAdvisor: the per-container (=> per-app) CPU/RAM/fs/io series.
+    prometheus.scrape "cadvisor" {
+      targets           = discovery.relabel.kubelet.output
+      job_name          = "cadvisor"
+      scheme            = "https"
+      metrics_path      = "/metrics/cadvisor"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- node-exporter (hostPort 9100 on the node) --------------------------
+    discovery.relabel "node_exporter" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+        target_label  = "__address__"
+        regex         = "(.+)"
+        replacement   = "${1}:9100"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "node_exporter" {
+      targets    = discovery.relabel.node_exporter.output
+      job_name   = "node-exporter"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- postgres-exporter (ClusterIP service in this namespace) ------------
+    prometheus.scrape "postgres" {
+      targets = [{ __address__ = "postgres-exporter.observability.svc.cluster.local:9187" }]
+      job_name   = "postgres"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- app-level metrics via pod annotations ------------------------------
+    // Any pod annotated `prometheus.io/scrape: "true"` gets scraped — this is
+    // how an app lights up its OWN business metrics (e.g. snoopy already exports
+    // reminders_fired_total on :8080/metrics via prometheus-client; it just
+    // needed a collector). Honors prometheus.io/port and prometheus.io/path.
+    // Assumes one metrics port per pod (true across this fleet).
+    discovery.kubernetes "pods" { role = "pod" }
+
+    discovery.relabel "app_pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Only pods that opt in.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+        regex         = "true"
+        action        = "keep"
+      }
+      // Skip pods that aren't running (pending/terminating expose nothing).
+      rule {
+        source_labels = ["__meta_kubernetes_pod_phase"]
+        regex         = "Running"
+        action        = "keep"
+      }
+      // prometheus.io/path overrides the default /metrics.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+      }
+      // prometheus.io/port overrides the scrape port (host:port rewrite).
+      rule {
+        source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+        separator     = ";"
+        regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+        replacement   = "$1:$2"
+        target_label  = "__address__"
+      }
+      // Carry namespace/pod/app through as labels (namespace == the app).
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    prometheus.scrape "app_pods" {
+      targets    = discovery.relabel.app_pods.output
+      job_name   = "app-pods"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: observability
+  labels: { app: alloy }
+spec:
+  selector:
+    matchLabels: { app: alloy }
+  template:
+    metadata:
+      labels: { app: alloy }
+      annotations:
+        # Roll the pod when the config changes (kubectl rollout restart also works).
+        config-hash: "replace-on-config-change"
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: docker.io/grafana/alloy:v1.5.1   # multi-arch (arm64 ok)
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          env:
+            - name: GRAFANA_CLOUD_PROM_URL
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-url } }
+            - name: GRAFANA_CLOUD_PROM_USER
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-user } }
+            - name: GRAFANA_CLOUD_PROM_PASSWORD
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-password } }
+          ports:
+            - { name: http, containerPort: 12345 }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 400Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/alloy }
+            - { name: data,   mountPath: /var/lib/alloy/data }
+      volumes:
+        - name: config
+          configMap: { name: alloy-config }
+        - name: data
+          emptyDir: {}

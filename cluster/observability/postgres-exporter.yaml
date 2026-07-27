@@ -1,0 +1,77 @@
+# postgres-exporter — the shared Postgres data plane, seen through the fleet's
+# multi-app lens. Because the cluster is db-per-app (snoopy_home / gelp /
+# transigen), the exporter's built-in metrics ARE the per-app view:
+#   pg_database_size_bytes{datname="gelp"}      -> gelp's data size
+#   pg_stat_database_numbackends{datname=...}   -> per-app connection count
+#   pg_stat_database_blks_hit / _read           -> cache hit ratio
+#   pg_stat_database_xact_commit / _rollback    -> transaction rate, deadlocks
+#
+# ISOLATION-RESPECTING BY DESIGN: the exporter connects ONLY to the `postgres`
+# maintenance DB with the `postgres_exporter` role (pg_monitor). pg_monitor
+# includes pg_read_all_stats, which lets pg_database_size() report EVERY app
+# DB's size WITHOUT a per-database CONNECT grant — so we get full per-app size
+# visibility without breaching the per-app connect isolation that
+# provision-db.sh enforces. Do NOT enable --auto-discover-databases: that would
+# make the exporter connect INTO each app DB and require breaking that isolation.
+#
+# TLS: sslmode=disable is intentional — this Postgres runs with no TLS by
+# design (traffic never leaves the trusted cluster network). Do not "fix" it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-exporter
+  namespace: observability
+---
+# The DATA_SOURCE_NAME (with the monitoring role password) is a Secret, created
+# out-of-band so no password is committed to git — mirrors postgres-secret:
+#   POSTGRES_EXPORTER_PASSWORD="<pw>" && \
+#   kubectl create secret generic postgres-exporter-dsn -n observability \
+#     --from-literal=DATA_SOURCE_NAME="postgresql://postgres_exporter:${POSTGRES_EXPORTER_PASSWORD}@postgres.data.svc.cluster.local:5432/postgres?sslmode=disable" \
+#     --dry-run=client -o yaml | kubectl apply -f -
+# The role itself is created by provision-monitoring-role.sh (see runbook).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: observability
+  labels: { app: postgres-exporter }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres-exporter }
+  template:
+    metadata:
+      labels: { app: postgres-exporter }
+    spec:
+      serviceAccountName: postgres-exporter
+      containers:
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0  # multi-arch
+          imagePullPolicy: IfNotPresent
+          args:
+            - --collector.database        # pg_database_size per DB
+            - --collector.stat_database    # per-DB connections / cache / tx
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom:
+                secretKeyRef: { name: postgres-exporter-dsn, key: DATA_SOURCE_NAME }
+          ports:
+            - { name: metrics, containerPort: 9187 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { cpu: 200m, memory: 128Mi }
+          readinessProbe:
+            httpGet: { path: /, port: metrics }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: observability
+  labels: { app: postgres-exporter }
+spec:
+  selector: { app: postgres-exporter }
+  ports:
+    - { name: metrics, port: 9187, targetPort: 9187 }

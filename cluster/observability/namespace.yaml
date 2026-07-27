@@ -1,0 +1,12 @@
+# The observability namespace holds everything that WATCHES the fleet but is
+# not part of it: the Grafana Alloy collector, node-exporter (DaemonSet) and
+# postgres-exporter. Kept out of `data`/app namespaces on purpose so a monitor
+# can never be mistaken for the thing it monitors, and so its RBAC stays scoped.
+#
+# NOTE: like `data` (created in data-postgres/postgres.yaml), this namespace is
+# created HERE rather than in cluster/namespaces.yaml — it is owned by the
+# observability stack, not by the app-plumbing list.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability

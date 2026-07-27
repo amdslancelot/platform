@@ -1,0 +1,33 @@
+# RBAC for Grafana Alloy. It needs to (a) discover the node and (b) scrape the
+# kubelet's authenticated /metrics and /metrics/cadvisor endpoints, which the
+# kubelet authorizes via a SubjectAccessReview against these node subresources.
+# Read-only; no write verbs anywhere.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy-observability
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, nodes/proxy, nodes/stats, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - nonResourceURLs: [/metrics, /metrics/cadvisor]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy-observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy-observability
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: observability

@@ -1,0 +1,65 @@
+# node-exporter — host-level metrics for the single node `louis2`:
+#   - disk SPACE (node_filesystem_*), CPU, RAM, network, load
+#   - the textfile collector, which surfaces our custom metrics written by the
+#     host-side systemd timer (scripts/image-metrics.sh + scripts/log-size.sh):
+#       * containerd/podman image count + size + on-disk bytes
+#       * per-pod container-log directory size
+#
+# A DaemonSet (one node today, but this is the correct shape and needs no edit
+# if a second node is ever added). hostNetwork+hostPID+host mounts give it the
+# real host view; imagePullPolicy IfNotPresent + a registry-qualified name so
+# containerd pulls it once (this is a public upstream image, NOT an on-node
+# build — the localhost/Never rule is only for app images built here).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-exporter
+  namespace: observability
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: observability
+  labels: { app: node-exporter }
+spec:
+  selector:
+    matchLabels: { app: node-exporter }
+  template:
+    metadata:
+      labels: { app: node-exporter }
+    spec:
+      serviceAccountName: node-exporter
+      hostNetwork: true          # bind :9100 on the host, see host network stats
+      hostPID: true
+      tolerations:
+        - operator: Exists       # scrape every node, including any future tainted one
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:v1.8.2   # multi-arch (arm64 ok)
+          imagePullPolicy: IfNotPresent
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            # Only the host filesystems we care about; skip pseudo/overlay noise.
+            - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/kubelet/pods|var/lib/rancher/k3s/agent/containerd)($|/)
+            # Custom metrics land here, written atomically by the host timer.
+            - --collector.textfile.directory=/host/textfile
+          ports:
+            - { name: metrics, containerPort: 9100, hostPort: 9100 }
+          resources:
+            requests: { cpu: 10m, memory: 20Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { name: proc,     mountPath: /host/proc,     readOnly: true }
+            - { name: sys,      mountPath: /host/sys,      readOnly: true }
+            - { name: root,     mountPath: /host/root,     readOnly: true, mountPropagation: HostToContainer }
+            - { name: textfile, mountPath: /host/textfile, readOnly: true }
+      volumes:
+        - { name: proc, hostPath: { path: /proc } }
+        - { name: sys,  hostPath: { path: /sys } }
+        - { name: root, hostPath: { path: / } }
+        # Same host dir the systemd timer writes .prom files into (see runbook).
+        - name: textfile
+          hostPath: { path: /var/lib/node_exporter/textfile_collector, type: DirectoryOrCreate }
