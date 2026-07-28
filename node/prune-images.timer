@@ -1,0 +1,19 @@
+# Daily, 03:00 node-local. Deploys are push-driven and land during the day, so
+# an overnight sweep never competes with a build for the 2-core node's CPU or
+# for the disk headroom a build needs. Persistent=true because the node does
+# get rebooted; a missed sweep runs shortly after boot rather than waiting a
+# full day.
+#
+# 每日 03:00 執行。部署都在白天發生,凌晨清理不會跟 build 搶 2 核心的 CPU 或
+# 磁碟空間。重開機錯過的排程會在開機後補跑。
+[Unit]
+Description=Daily prune of leaked podman/containerd images
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=5min
+Unit=prune-images.service
+
+[Install]
+WantedBy=timers.target

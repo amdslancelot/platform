@@ -1,0 +1,24 @@
+# Reclaim leaked container-image disk on the shared node. oneshot, fired by
+# prune-images.timer — see node/prune-images.sh for what it will and will not
+# delete. ExecStart points at the platform checkout on the node (~opc/platform,
+# NOT /opt — see CLAUDE.md).
+#
+# Install (or node/install-prune-timer.sh, which does this):
+#   cp node/prune-images.{service,timer} /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now prune-images.timer
+[Unit]
+Description=Prune leaked podman/containerd images (platform-owned)
+After=k3s.service
+# k3s must be up: the script talks to containerd through crictl and reads live
+# workload specs through kubectl to decide what is safe to remove. Without it
+# every image would look unreferenced.
+Requires=k3s.service
+
+[Service]
+Type=oneshot
+User=root
+Environment=KEEP=2
+ExecStart=/home/opc/platform/node/prune-images.sh
+# A failed cleanup is not an incident — it just means the disk is reclaimed on
+# the next run. Never let it wedge the unit into a restart loop.
+TimeoutStartSec=15min
