@@ -6,46 +6,38 @@
 <title>Platform Project Topology — lans-h.cc fleet</title>
 <style>
   :root{
-    --bg:#f6f7f9; --fg:#1c2430; --muted:#5b6675; --card:#ffffff; --card2:#eef1f5;
-    --line:#8a97a8; --border:#c7cfda; --accent:#2f6df6; --live:#16a34a; --live-fg:#fff;
-    --app:#e8f0ff; --app-bd:#9cc0ff; --infra:#fbeee0; --infra-bd:#e6c79a;
-    --data:#e7f6ee; --data-bd:#9fd8b8; --platform:#f0e9fb; --platform-bd:#c9b1ee;
-    --node:#f0f3f8; --node-bd:#b6c0cf; --dim:#eef0f3;
+    color-scheme:light;
+    /* homepage palette (matcha bg, near-white cards, grayscale text) */
+    --bg:#d3e4db; --fg:#111; --muted:#666; --card:#ededed; --card2:#e4e4e1;
+    --line:#9aa39a; --border:#d0d4cd; --accent:#2f6d54; --live:#2f6d54; --live-fg:#fff;
+    --app:#e6eef5; --app-bd:#b6cbe0; --infra:#e6e9ec; --infra-bd:#c4ccd4;
+    --data:#e2efe4; --data-bd:#aecfb6; --platform:#ece6f4; --platform-bd:#c8b8e2;
+    --node:#eef0ec; --node-bd:#c6ccc2; --dim:#e6e8e3;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0e1420; --fg:#e6edf5; --muted:#93a1b4; --card:#161d2b; --card2:#1c2536;
-      --line:#5b6a80; --border:#33405a; --accent:#5b93ff; --live:#26c281; --live-fg:#07130c;
-      --app:#152744; --app-bd:#2f4f86; --infra:#33260f; --infra-bd:#6b5327;
-      --data:#0f2a1c; --data-bd:#245a3d; --platform:#241a3c; --platform-bd:#4a3a75;
-      --node:#121a28; --node-bd:#33405a; --dim:#182130;
-    }
-  }
+
+  /* Dark is opt-in, not OS-driven: the page always opens light so a demo looks
+     the same on any machine, and the toggle below flips it. Same green-tinted
+     neutral family as the matcha light palette, inverted — not a generic navy
+     dark theme, so both modes read as one design. */
   :root[data-theme="dark"]{
-      --bg:#0e1420; --fg:#e6edf5; --muted:#93a1b4; --card:#161d2b; --card2:#1c2536;
-      --line:#5b6a80; --border:#33405a; --accent:#5b93ff; --live:#26c281; --live-fg:#07130c;
-      --app:#152744; --app-bd:#2f4f86; --infra:#33260f; --infra-bd:#6b5327;
-      --data:#0f2a1c; --data-bd:#245a3d; --platform:#241a3c; --platform-bd:#4a3a75;
-      --node:#121a28; --node-bd:#33405a; --dim:#182130;
-  }
-  :root[data-theme="light"]{
-    --bg:#f6f7f9; --fg:#1c2430; --muted:#5b6675; --card:#ffffff; --card2:#eef1f5;
-    --line:#8a97a8; --border:#c7cfda; --accent:#2f6df6; --live:#16a34a; --live-fg:#fff;
-    --app:#e8f0ff; --app-bd:#9cc0ff; --infra:#fbeee0; --infra-bd:#e6c79a;
-    --data:#e7f6ee; --data-bd:#9fd8b8; --platform:#f0e9fb; --platform-bd:#c9b1ee;
-    --node:#f0f3f8; --node-bd:#b6c0cf; --dim:#eef0f3;
+    --bg:#141a17; --fg:#e8ece9; --muted:#98a49d; --card:#1c2320; --card2:#232a26;
+    --line:#5f6b64; --border:#333c37; --accent:#7fc4a3; --live:#4f9f7b; --live-fg:#0a1410;
+    --app:#1a2733; --app-bd:#3a5670; --infra:#232827; --infra-bd:#495049;
+    --data:#17281e; --data-bd:#39634a; --platform:#241f30; --platform-bd:#4b4066;
+    --node:#181e1b; --node-bd:#39423c; --dim:#212724;
+    color-scheme:dark;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Roboto,Helvetica,Arial,sans-serif;
-    line-height:1.55;padding:28px 20px 64px;}
+    font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
+    line-height:1.55;padding:40px 24px 72px;}
   .wrap{max-width:1240px;margin:0 auto}
-  header.doc h1{font-size:26px;margin:0 0 4px}
+  a{color:inherit}
+  header.doc h1{font-size:1.9rem;font-weight:600;margin:0 0 6px;letter-spacing:-0.01em}
   header.doc .sub{color:var(--muted);font-size:15px;margin:0 0 2px}
   header.doc .meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:8px}
-  .diagram{margin:22px 0 8px;background:var(--card);border:1px solid var(--border);
-    border-radius:14px;padding:10px;overflow-x:auto}
+    font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;margin-top:10px}
+  .diagram{margin:24px 0 8px;background:var(--card);border-radius:8px;padding:14px;overflow-x:auto}
   svg{display:block;width:100%;height:auto;min-width:920px}
 
   /* SVG element styling (kept inside so the SVG exports self-contained) */
@@ -58,47 +50,60 @@
   .b-platform{fill:var(--platform);stroke:var(--platform-bd)}
   .b-ext{fill:var(--card);stroke:var(--border)}
   .b-strip{fill:var(--dim);stroke:var(--border)}
-  .t{fill:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Arial,sans-serif}
-  .title{font-size:16px;font-weight:700}
+  .t{fill:var(--fg);font-family:'Helvetica Neue',Helvetica,Arial,sans-serif}
+  .title{font-size:16px;font-weight:600}
   .nslabel{font-size:12px;font-weight:700;fill:var(--accent);letter-spacing:.3px}
   .sub{font-size:12.5px;fill:var(--muted)}
-  .mono{font-size:12px;fill:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .mono{font-size:12px;fill:var(--muted);font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace}
   .edge{stroke:var(--line);stroke-width:2;fill:none}
-  .edge-lbl{font-size:11.5px;fill:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .edge-lbl{font-size:11.5px;fill:var(--muted);font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    paint-order:stroke;stroke:var(--node);stroke-width:3px;stroke-linejoin:round}
   .live-pill{fill:var(--live)}
   .live-txt{fill:var(--live-fg);font-size:12px;font-weight:700}
   a.live{cursor:pointer}
   a.live:hover .live-pill{opacity:.85}
 
-  .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:26px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
-  .card h3{margin:0 0 10px;font-size:15px}
+  .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:28px}
+  .card{background:var(--card);border-radius:6px;padding:18px 20px}
+  .card h3{margin:0 0 10px;font-size:15px;font-weight:600}
   .card .zh{color:var(--muted);font-weight:400;font-size:13px}
   table{border-collapse:collapse;width:100%;font-size:13.5px}
   th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--border);vertical-align:top}
   th{color:var(--muted);font-weight:600}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;
+  code{font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
     background:var(--dim);padding:1px 5px;border-radius:5px}
-  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;
     background:var(--live);color:var(--live-fg);text-decoration:none}
   .note{color:var(--muted);font-size:12.5px;margin-top:6px}
   ul,ol{margin:6px 0 0;padding-left:18px}
   li{margin:3px 0}
   .foot{color:var(--muted);font-size:12.5px;margin-top:28px;border-top:1px solid var(--border);padding-top:12px}
-  .lede{max-width:980px;margin:14px 0 2px;font-size:15px;line-height:1.6}
-  .lede b{font-weight:700}
-  .section-h{font-size:18px;margin:38px 0 0}
+  .lede{max-width:980px;margin:16px 0 2px;font-size:15px;line-height:1.6;color:#333}
+  .lede b{font-weight:600}
+  .section-h{font-size:1.5rem;font-weight:600;margin:40px 0 0}
   .why .card p{margin:0;font-size:13.5px;color:var(--muted)}
   .why .card b{color:var(--fg)}
+  header.doc{position:relative}
+  .theme-btn{position:absolute;top:2px;right:0;background:var(--card);color:var(--muted);
+    border:1px solid var(--border);border-radius:999px;padding:6px 14px;font:inherit;
+    font-size:12.5px;cursor:pointer;line-height:1}
+  .theme-btn:hover{color:var(--fg)}
+  @media print{.theme-btn{display:none}}
 </style>
+<script>
+  // Runs before paint: without this, someone who chose dark last time gets a
+  // flash of the light palette while the body parses.
+  try{var t=localStorage.getItem('topology-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}
+</script>
 </head>
 <body>
 <div class="wrap">
   <header class="doc">
+    <button class="theme-btn" id="themeBtn" type="button" aria-label="Toggle dark mode">Dark</button>
     <h1>Platform Project Topology — lans-h.cc fleet</h1>
     <p class="sub">A reusable platform layer (MVP) — four workloads today, additive onboarding for the next</p>
     <p class="lede">A ground-up re-imagining of platform infrastructure — how I'd design one, drawing on 10+ years of engineering. It owns <b>everything two or more apps stand on</b>; each app declares only its own thin slice — a namespace, a <code>Host(...)</code> rule, a database role, and one deploy hook.</p>
-    <p class="meta">prod node: OCI A1.Flex &ldquo;louis2&rdquo; · 92.5.135.46 · OL9 arm64 · single-node k3s + Traefik &nbsp;|&nbsp; as of 2026-07-26</p>
+    <p class="meta">prod node: OCI A1.Flex &ldquo;louis2&rdquo; · 92.5.135.46 · OL9 arm64 · single-node k3s + Traefik &nbsp;|&nbsp; as of 2026-07-28</p>
   </header>
 
   <div class="diagram">
@@ -120,17 +125,19 @@
       <!-- Internet -> Cloudflare -->
       <path class="edge" d="M600,66 L600,94" marker-end="url(#arrow)"/>
 
-      <!-- Cloudflare -> Traefik (443) and -> webhook (9000) -->
-      <path class="edge" d="M560,162 C500,215 440,235 400,286" marker-end="url(#arrow)"/>
-      <text class="edge-lbl" x="452" y="212" text-anchor="middle">TCP 80/443 · HTTPS</text>
-      <path class="edge" d="M660,162 C760,210 880,235 945,286" marker-end="url(#arrow)"/>
-      <text class="edge-lbl" x="835" y="210" text-anchor="middle">TCP 9000 · HTTP+HMAC</text>
+      <!-- Cloudflare -> Traefik / -> webhook: drawn AFTER the container (below), so the labels aren't covered -->
 
       <!-- ===== Node container ===== -->
       <rect class="container" x="40" y="188" width="1120" height="852" rx="16"/>
       <rect class="tab" x="40" y="188" width="404" height="52" rx="16"/>
       <text class="t" x="60" y="211" font-size="13" font-weight="700">OCI A1.Flex · louis2 · 92.5.135.46</text>
       <text class="t sub" x="60" y="230" font-size="12">OL9 arm64 · single-node k3s (Traefik enabled, kubeconfig 644)</text>
+
+      <!-- Cloudflare -> Traefik (443) / -> webhook (9000) — drawn here so they sit on top of the container and their labels stay visible -->
+      <path class="edge" d="M560,162 C500,215 440,235 400,286" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="426" y="258" text-anchor="middle">TCP 80/443 · HTTPS</text>
+      <path class="edge" d="M660,162 C760,210 880,235 945,286" marker-end="url(#arrow)"/>
+      <text class="edge-lbl" x="900" y="258" text-anchor="middle">TCP 9000 · HTTP+HMAC</text>
 
       <!-- ===== Ingress row ===== -->
       <rect class="box b-infra" x="70" y="286" width="640" height="74" rx="12"/>
@@ -187,16 +194,16 @@
       <rect class="box b-app" x="880" y="410" width="250" height="190" rx="12"/>
       <text class="t nslabel" x="898" y="436">ns: snoopy</text>
       <text class="t title" x="898" y="462" font-size="15">snoopy</text>
-      <text class="t sub" x="898" y="484">Telegram/chat bot</text>
+      <text class="t sub" x="898" y="484">discord.py · Gemini · Postgres</text>
       <text class="t sub" x="898" y="503">no Ingress · zero-inbound</text>
       <text class="t mono" x="898" y="522">img: localhost/snoopy</text>
       <rect class="box b-strip" x="898" y="536" width="150" height="26" rx="13"/>
       <text class="t sub" x="973" y="554" text-anchor="middle" font-size="11">internal only</text>
 
-      <!-- app -> data edges (left three depend on Postgres) -->
-      <path class="edge" d="M170,600 L230,636" marker-end="url(#arrow)"/>
-      <path class="edge" d="M430,600 L400,636" marker-end="url(#arrow)"/>
-      <path class="edge" d="M700,600 L560,636" marker-end="url(#arrow)"/>
+      <!-- app -> data edges (gelp, transigen, snoopy use Postgres; my_website is static) -->
+      <path class="edge" d="M450,600 L360,636" marker-end="url(#arrow)"/>
+      <path class="edge" d="M720,600 L470,636" marker-end="url(#arrow)"/>
+      <path class="edge" d="M990,600 L600,636" marker-end="url(#arrow)"/>
 
       <!-- ===== Data + platform row (y=640 h=118) ===== -->
       <rect class="box b-data" x="70" y="640" width="640" height="118" rx="12"/>
@@ -325,5 +332,17 @@
 
   <p class="foot">A reusable platform layer — one shared single-node k3s cluster, one wildcard-TLS domain, one signed deploy webhook — that any number of apps can stand on. Onboarding the next app is additive: a namespace, a <code>Host(...)</code> rule, a database role, one hook. A local minikube cluster mirrors the setup for dev/staging and is the lab for a future GitOps (Argo CD) model. &nbsp; Source of truth: <code>platform/README.md</code>, <code>cluster/namespaces.yaml</code>, <code>webhook/hooks.json</code>; migration log: <code>learning/platform-migration-2026-07-24.md</code>.</p>
 </div>
+<script>
+  // Light is the default; a click sets an explicit override and remembers it.
+  var root = document.documentElement, btn = document.getElementById('themeBtn');
+  function sync(){ btn.textContent = root.dataset.theme === 'dark' ? 'Light' : 'Dark'; }
+  btn.addEventListener('click', function(){
+    var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next;
+    try{ localStorage.setItem('topology-theme', next); }catch(e){}
+    sync();
+  });
+  sync();
+</script>
 </body>
 </html>
