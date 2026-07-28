@@ -50,7 +50,10 @@ docs/                 runbook (migration/cutover), OCI security list
   being copied into four pipelines that would still miss a manual build. With
   no registry here, it never deletes an image a live workload spec names, and
   keeps the newest `KEEP` (default 2) *distinct* images per `localhost/*` repo
-  so a rollback target survives.
+  in **both** stores so a rollback target survives. Both stores, because
+  dangling-only cleanup silently depends on tag reuse: the three apps that
+  rebuild `:latest` orphan their previous image, snoopy's git-sha tags never
+  orphan anything, and its builds would accumulate untouched.
 - Migration state and pending steps: `docs/runbook.md`.
 
 *設計規則:app 永遠不安裝叢集級的東西(cert-manager、issuer、Postgres、hook

@@ -21,9 +21,10 @@
 #   1. anything a running container references (crictl refuses anyway);
 #   2. anything named in a live workload spec — a Deployment scaled to zero, or
 #      a CronJob that only runs at 03:30, still needs its image to exist;
-#   3. the newest ${KEEP} tags of each localhost/* repository, so there is at
-#      least one rollback target. snoopy tags images by git sha, which is the
-#      only app here with a real version history to roll back through.
+#   3. the newest ${KEEP} *distinct images* of each localhost/* repository — in
+#      BOTH stores — so there is at least one rollback target. Distinct images,
+#      not tags: two tags on one build must not count as two. snoopy tags by git
+#      sha, the only app here with a real version history to roll back through.
 #
 # 絕不刪除的三層保護:執行中容器引用的、live workload spec 指名的(縮到 0 的
 # Deployment 或每天才跑一次的 CronJob 也算)、以及每個 localhost/* repo 最新的
@@ -54,15 +55,89 @@ avail() { df -BM --output=avail / | awk 'NR==2{print $1}'; }
 BEFORE="$(avail)"
 log "root available before: ${BEFORE}"
 
-# --- 1. podman: drop dangling build layers -----------------------------------
-# Only dangling. Tagged bases (node:22-alpine, nginx:alpine, ...) stay put —
-# they are the build cache, and re-pulling them costs a slow arm64 fetch.
-# podman runs nothing on this node; it is purely a build tool.
+# --- 1a. podman: drop dangling build layers ----------------------------------
+# Tagged bases (node:22-alpine, nginx:alpine, ...) stay put — they are the build
+# cache, and re-pulling them costs a slow arm64 fetch. podman runs nothing on
+# this node; it is purely a build tool.
 log "podman: pruning dangling images"
 if [ "${DRY_RUN}" = "1" ]; then
   podman images --filter dangling=true --format '  would remove {{.ID}} {{.Size}}' || true
 else
   podman image prune -f || log "WARNING: podman prune failed; continuing"
+fi
+
+# --- 1b. podman: retain only the newest ${KEEP} localhost/* images ------------
+# Dangling alone is not enough, and which app you look at decides whether you
+# notice. gelp/transigen/my_website rebuild the SAME tag every deploy
+# (localhost/<app>:latest), so each new build strips the tag off the previous
+# image, it becomes <none>, and the prune above collects it — that is where the
+# 77 dangling images came from. snoopy tags by git sha instead, so no tag is
+# ever reused, nothing is ever orphaned, and its images accumulate one per
+# deploy at ~789MB each while `podman images -f dangling=true` reports nothing.
+#
+# The sha scheme is the better one — `:latest` cannot tell you which commit is
+# running — so the fix belongs here, not in snoopy's pipeline. Same retention
+# rule as containerd below, for the same reason: keep a rollback source, drop
+# the rest.
+#
+# 只清 dangling 不夠:三個 app 每次重用 `:latest`,舊 image 因此失去 tag 變成
+# dangling 才被收走;snoopy 用 git sha 當 tag,永遠沒有 tag 被搶走,所以一個都不會
+# 變 dangling,每次部署就多積一份。sha 才是比較好的做法,所以修在這裡而不是改
+# snoopy。
+log "podman: retaining newest ${KEEP} per localhost/* repository"
+PODMAN_PLAN="$(mktemp)"
+trap 'rm -f "${PODMAN_PLAN}" "${PLAN:-}"' EXIT
+
+python3 - "${KEEP}" >"${PODMAN_PLAN}" <<'PYEOF'
+import json, subprocess, sys
+
+keep = int(sys.argv[1])
+out = subprocess.run(["podman", "images", "--format", "json"],
+                     capture_output=True, text=True).stdout.strip()
+images = json.loads(out) if out else []
+
+# Group every localhost/* tag by its repository. One image can carry several
+# tags; rank by distinct image, not by tag, or two tags on one build would
+# "keep two" that are the same bytes — the bug the containerd side hit first.
+repos = {}
+for img in images:
+    for name in img.get("Names") or []:
+        if name.startswith("localhost/"):
+            repo = name.rsplit(":", 1)[0]
+            repos.setdefault(repo, []).append((name, img["Id"], img.get("Created", 0),
+                                               img.get("Size", 0)))
+
+emitted = set()
+for repo, tags in repos.items():
+    ranked = sorted(tags, key=lambda t: t[2], reverse=True)
+    keep_ids = []
+    for _, img_id, _, _ in ranked:
+        if img_id not in keep_ids:
+            keep_ids.append(img_id)
+        if len(keep_ids) == keep:
+            break
+    for name, img_id, _, size in ranked:
+        # podman lists an image once per tag, each carrying the full Names list,
+        # so the same ref shows up more than once; emitting it twice would make
+        # the second `podman rmi` fail and log a misleading "in use".
+        if img_id not in keep_ids and name not in emitted:
+            emitted.add(name)
+            print("REF", name, size)
+PYEOF
+
+if [ ! -s "${PODMAN_PLAN}" ]; then
+  log "podman: nothing to retire"
+else
+  while read -r _ target size; do
+    human="$(numfmt --to=iec --suffix=B "${size}" 2>/dev/null || echo "${size}")"
+    if [ "${DRY_RUN}" = "1" ]; then
+      echo "  would remove ${target} (${human})"
+    elif podman rmi "${target}" >/dev/null 2>&1; then
+      echo "  removed ${target} (${human})"
+    else
+      echo "  skipped ${target} (in use)"
+    fi
+  done <"${PODMAN_PLAN}"
 fi
 
 # --- 2/3. containerd: plan the deletions -------------------------------------
@@ -71,7 +146,7 @@ fi
 # We compute the plan first so DRY_RUN can show it and so every deletion below
 # is visible in the log.
 PLAN="$(mktemp)"
-trap 'rm -f "${PLAN}"' EXIT
+trap 'rm -f "${PODMAN_PLAN}" "${PLAN}"' EXIT   # replaces the earlier trap; both files
 
 python3 - "${K3S}" "${KEEP}" >"${PLAN}" <<'PYEOF'
 import json, subprocess, sys
