@@ -1,11 +1,18 @@
 # Reclaim leaked container-image disk on the shared node. oneshot, fired by
 # prune-images.timer — see node/prune-images.sh for what it will and will not
-# delete. ExecStart points at the platform checkout on the node (~opc/platform,
-# NOT /opt — see CLAUDE.md).
+# delete.
 #
-# Install (or node/install-prune-timer.sh, which does this):
-#   cp node/prune-images.{service,timer} /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now prune-images.timer
+# ExecStart deliberately points at /usr/local/sbin, NOT at the checkout in
+# ~opc/platform. SELinux is Enforcing here, and anything under /home carries
+# user_home_t, which systemd's init_t may not execute — running the script
+# straight out of the checkout fails with 203/EXEC "Permission denied" that
+# looks nothing like a label problem. install-prune-timer.sh copies the script
+# to /usr/local/sbin (bin_t, same as the webhook binary) and restorecons it.
+#
+# SELinux Enforcing:/home 下是 user_home_t,systemd 不能執行,所以腳本要裝到
+# /usr/local/sbin(bin_t)而不是直接跑 checkout 裡那份。
+#
+# Install: sudo bash node/install-prune-timer.sh
 [Unit]
 Description=Prune leaked podman/containerd images (platform-owned)
 After=k3s.service
@@ -18,7 +25,7 @@ Requires=k3s.service
 Type=oneshot
 User=root
 Environment=KEEP=2
-ExecStart=/home/opc/platform/node/prune-images.sh
+ExecStart=/usr/local/sbin/prune-images.sh
 # A failed cleanup is not an incident — it just means the disk is reclaimed on
 # the next run. Never let it wedge the unit into a restart loop.
 TimeoutStartSec=15min
