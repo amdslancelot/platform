@@ -117,26 +117,48 @@ a crash dump cannot fill `/`. Leave it alone.
 
 ---
 
-## Step 1 — reclaim ~1.7GB and cap what grows (online, no partition change)
+## Step 1 — reclaim ~2GB of dead cache (online, no partition change)
 
-**Goal / 目標:** delete two dead caches and put a ceiling on the journal, which
-is currently uncapped and will grow to 10% of `/`.
+**Goal / 目標:** delete two dead caches — the only two reclaimable items of any
+size on this node.
 
-*刪掉兩個死掉的快取,並替 journal 設上限 —— 它現在沒有上限,預設會長到 `/` 的 10%。*
+*刪掉兩個死掉的快取 —— 這台機器上唯二有份量、又能安全回收的東西。*
+
+Check the orphan's path before deleting rather than trusting a glob: the point
+of naming it explicitly is that `rm -rf` is the one command here with no safety
+net of its own.
+
+*刪之前先確認孤兒目錄的實際路徑,不要靠萬用字元:寫死路徑的理由是 `rm -rf` 是這裡
+唯一沒有自帶安全網的指令。*
 
 ```bash
-sudo dnf clean all                                    # dnf 中繼資料與套件快取,848M,下次 dnf 會自己重抓
-sudo rm -rf /var/tmp/dnf-opc-*                        # 某次 opc 跑 dnf 中斷留下的孤兒交易目錄,842M
-sudo journalctl --vacuum-size=200M                    # 立刻把既有 journal 修剪到 200M
-echo 'SystemMaxUse=500M' | sudo tee -a /etc/systemd/journald.conf   # 封頂,否則會長到 3G
-sudo systemctl restart systemd-journald               # 套用上限
+sudo ls -d /var/tmp/dnf-*                             # 確認確實只有那一個孤兒目錄
+sudo du -sh /var/cache/dnf /var/tmp/dnf-*             # 確認大小符合預期（約 848M / 842M）
+```
+
+```bash
+sudo dnf clean all                                    # dnf 中繼資料與套件快取,下次 dnf 會自己重抓
+sudo rm -rf /var/tmp/dnf-opc-xvk7qa63                 # 某次 opc 跑 dnf 中斷留下的孤兒交易目錄；用上一步確認的實際路徑
 df -h /                                               # 看回收結果
 ```
 
-**Expect / 預期:** `/` available goes from 13G to roughly 14.7G; `journalctl
---disk-usage` reports under 200M.
+**Expect / 預期:** `/` goes from 17G used to about 15G, available 13G → 15G
+(57% → 51%).
 
-*預期:`/` 可用從 13G 增至約 14.7G;`journalctl --disk-usage` 低於 200M。*
+*預期:`/` 用量從 17G 降到約 15G,可用 13G → 15G(57% → 51%)。*
+
+**問題 / Problem:** the journal looks like a third growth source — 214M and no
+`SystemMaxUse` set, which would normally mean it grows to 10% of `/`.
+**解法 / Fix:** it is not. `/var/log/journal` does not exist on this node, so
+journald's default `Storage=auto` falls back to `/run/log/journal`, and `/run`
+is a 2.2G tmpfs — the journal costs RAM, not disk. `SystemMaxUse` governs the
+persistent path only; the volatile one is `RuntimeMaxUse`. Leave it alone.
+
+*問題:journal 看起來像第三個成長來源 —— 214M 且沒設 `SystemMaxUse`,照理會長到
+`/` 的 10%。解法:並沒有。本節點沒有 `/var/log/journal`,所以 journald 預設的
+`Storage=auto` 會退回 `/run/log/journal`,而 `/run` 是 2.2G 的 tmpfs —— journal
+吃的是記憶體不是磁碟。`SystemMaxUse` 只管持久化那條路徑,volatile 的對應設定是
+`RuntimeMaxUse`。不用動它。*
 
 Optional, from `docs/security-posture-audit.md`: this node runs no NFS, so
 `rpcbind` is listening on `0.0.0.0:111` for nothing.
@@ -182,25 +204,63 @@ The boot-volume backup from the precondition above must already exist and be
 *上面前置條件的 boot volume 備份必須已經做好,而且狀態是 `AVAILABLE`。*
 
 ```bash
-sudo parted /dev/sda print free | tail -5             # 記下未分配區段的起點（目前 50.0GB）與終點
-sudo parted -a optimal /dev/sda -- mkpart lvm 50.0GB 100%   # 從該起點切到磁碟末端；-a optimal 處理對齊
-sudo parted /dev/sda set 4 lvm on                     # 標記為 LVM 用途
-lsblk /dev/sda                                        # 確認 sda4 出現且大小約 165G
+sudo parted /dev/sda unit s print free                # 記下未分配區段的起訖磁區
+sudo sfdisk --verify /dev/sda                         # 先驗分割表本身是否健康
 ```
 
-**Expect / 預期:** `lsblk` shows a new `sda4` of roughly 165G. `sda1`–`sda3` are
-unchanged; nothing is mounted or unmounted.
+**問題 / Problem:** `parted` prompts *"Not all of the space available to
+/dev/sda appears to be used, you can fix the GPT to use all of the space"*, and
+`sfdisk --verify` reports **`The backup GPT table is not on the end of the
+device`** plus a PMBR size mismatch.
+**解法 / Fix:** the OCI boot volume was expanded past the size the image's GPT
+was written for, so the backup header still sits where the old disk ended. Move
+it before creating anything, or the new partition has nowhere valid to live.
+Back the table up to a file first — it restores in seconds, unlike the volume
+backup.
 
-*預期:`lsblk` 出現約 165G 的 `sda4`,`sda1`–`sda3` 不變,沒有任何掛載或卸載。*
+*問題:`parted` 跳出「磁碟空間沒有用完,要修正 GPT 嗎」的提示,`sfdisk --verify` 報
+**備份 GPT 表不在磁碟末端**加上 PMBR 大小不符。解法:OCI boot volume 被擴充到超過
+映像檔當初寫 GPT 時的大小,備份標頭還停在舊磁碟的末端。要先把它搬過去,新分割區
+才有合法的位置。動手前先把分割表備份成檔案 —— 它比卷備份快得多,幾秒就還原。*
 
-**問題 / Problem:** `parted` warns the partition is not properly aligned for
-best performance.
-**解法 / Fix:** you passed an explicit start that is not on a boundary. Re-run
-with `-a optimal` and let percentages pick the start, or take the exact free-
-space start printed by `print free`.
+```bash
+sudo sgdisk --backup=/root/sda-gpt-$(date +%Y%m%d).bin /dev/sda   # 分割表備份成檔案
+sudo sh -c 'ls -l /root/sda-gpt-*.bin'                # 確認檔案真的建立（glob 要在 root shell 裡展開）
+sudo sgdisk -e /dev/sda                               # 把 GPT 備份標頭搬到磁碟末端
+sudo sfdisk --verify /dev/sda                         # 應不再有 error
+sudo partprobe /dev/sda                               # 讓核心重讀分割表
+```
 
-*問題:`parted` 警告分割區未對齊。解法:起點沒落在邊界上 —— 用 `-a optimal` 並讓
-百分比決定起點,或直接照抄 `print free` 印出來的起點。*
+**Expect / 預期:** `sfdisk --verify` stops reporting errors and the `parted`
+prompt is gone. Only the GPT headers were rewritten; no partition changed.
+Restore path if needed: `sgdisk --load-backup=/root/sda-gpt-<date>.bin /dev/sda`.
+
+*預期:`sfdisk --verify` 不再報錯,`parted` 的提示消失。只改寫了 GPT 標頭,沒有任何
+分割區被更動。要還原:`sgdisk --load-backup=/root/sda-gpt-<日期>.bin /dev/sda`。*
+
+Use the exact start sector from `print free`, not a rounded `50.0GB` — and check
+it is a multiple of 2048 (1MiB) so the partition lands aligned.
+
+*用 `print free` 印出的精確起始磁區,不要用四捨五入的 `50.0GB` —— 並確認它是 2048
+(1MiB)的整數倍,分割區才會對齊。*
+
+```bash
+sudo parted -s -a optimal /dev/sda unit s mkpart lvm <起始磁區>s <結束磁區>s   # 精確到磁區
+sudo parted -s /dev/sda set 4 lvm on                  # 標記為 LVM 用途
+sudo partprobe /dev/sda                               # 讓核心看見 sda4
+sudo parted /dev/sda align-check optimal 4            # 預期輸出「4 aligned」
+lsblk /dev/sda                                        # 確認 sda4 出現
+sudo parted /dev/sda unit s print                     # 對照 sda1–sda3 的起訖磁區沒有變動
+```
+
+**Expect / 預期:** `align-check` prints `4 aligned`; `lsblk` shows a new `sda4`
+of **153.4 GiB** — the same space as the "165GB" quoted elsewhere in this
+document, which is decimal GB. `sda1`–`sda3` keep the exact start and end
+sectors they had; nothing is mounted or unmounted.
+
+*預期:`align-check` 印出 `4 aligned`;`lsblk` 出現 **153.4 GiB** 的 `sda4` ——
+跟本文件其他地方講的「165GB」是同一塊空間,那是十進位 GB。`sda1`–`sda3` 的起訖磁區
+與動手前完全相同,沒有任何掛載或卸載。*
 
 ```bash
 sudo pvcreate /dev/sda4                               # 把新分割區做成 PV
@@ -210,11 +270,11 @@ sudo vgs ocivolume                                    # VFree 從 0 變成約 16
 ```
 
 **Expect / 預期:** `pvs` lists two PVs — `/dev/sda3` with `PFree 0` and
-`/dev/sda4` with `PFree` around 165g; `vgs` shows `VFree` around `165g`. `df` is
+`/dev/sda4` with `PFree` around 153.4g; `vgs` shows `VSize` ~197.9g and `VFree`
+~153.4g, `#PV 2`. `df` is
 unchanged at this point, which is correct — no filesystem has been touched.
 
-*預期:`pvs` 兩行 —— `/dev/sda3` 的 `PFree` 是 0,`/dev/sda4` 約 165g;`vgs` 的
-`VFree` 約 `165g`。此時 `df` 不會變,這是對的,還沒有動到任何檔案系統。*
+*預期:`pvs` 兩行 —— `/dev/sda3` 的 `PFree` 是 0,`/dev/sda4` 約 153.4g;`vgs` 的 `VSize` 約 197.9g、`VFree` 約 153.4g、`#PV 2`。此時 `df` 不會變,這是對的,還沒有動到任何檔案系統。*
 
 **Rollback / 回退:** clean, as long as no LV has been given extents on `sda4`
 yet — which is true until step 3 runs.
@@ -254,21 +314,32 @@ removed, which throws away the retreat path step 2 was chosen for.
 兩顆。只要有 extent 落在 `sda3`,將來要移除 `sda4` 就得先 `pvmove` —— 那等於丟掉
 步驟 2 特地換來的退路。*
 
+Size them small and leave the rest unallocated. XFS grows online but **cannot
+shrink**, so under-allocating is reversible and over-allocating is not. 80G and
+20G are roughly 19x and 35x current usage, which is ample headroom for stores
+that a daily prune already bounds.
+
+*配小一點,其餘留在池子裡。XFS 能線上長大但**不能縮小**,所以配少了可以補、配多了
+回不來。80G 與 20G 約是目前用量的 19 倍與 35 倍,對已經有每日 prune 頂著的儲存區
+綽綽有餘。*
+
 ```bash
-sudo lvcreate -L 100G -n k3s    ocivolume /dev/sda4  # k3s 執行期與資料:image、kine db、PVC；只用 sda4
-sudo lvcreate -L 40G  -n podman ocivolume /dev/sda4  # podman build 快取；同樣釘在 sda4
+sudo lvcreate -L 80G -n k3s    ocivolume /dev/sda4   # k3s 執行期與資料:image、kine db、PVC；只用 sda4
+sudo lvcreate -L 20G -n podman ocivolume /dev/sda4   # podman build 快取；同樣釘在 sda4
 sudo lvs -o lv_name,lv_size,devices ocivolume        # 確認兩個新 LV 的 Devices 欄都是 /dev/sda4
 sudo mkfs.xfs /dev/ocivolume/k3s                     # 格式化（全新 LV,不需要也不該加 -f）
 sudo mkfs.xfs /dev/ocivolume/podman
-sudo vgs ocivolume                                   # 刻意留約 25G 沒配出去,之後要加給誰都行
+sudo blkid /dev/ocivolume/k3s /dev/ocivolume/podman  # 確認兩個都有 xfs 簽章
+sudo vgs ocivolume                                   # 刻意留約 53G 沒配出去,之後要加給誰都行
 ```
 
 **Expect / 預期:** two new LVs, both showing `/dev/sda4(...)` in the `Devices`
-column; `VFree` around 25g. Leaving slack unallocated is the whole advantage of
-LVM — allocate it when you know who needs it.
+column — neither straddles `sda3`, so step 2's retreat path survives. `VFree`
+around 53g. Leaving slack unallocated is the whole advantage of LVM — allocate
+it when you know who needs it.
 
-*預期:兩個新 LV,`Devices` 欄都是 `/dev/sda4(...)`;`VFree` 約 25g。刻意留白正是
-LVM 的好處 —— 等知道誰要用再配。*
+*預期:兩個新 LV,`Devices` 欄都是 `/dev/sda4(...)` —— 都沒跨到 `sda3`,步驟 2 的
+退路保住了。`VFree` 約 53g。刻意留白正是 LVM 的好處 —— 等知道誰要用再配。*
 
 Now stop the cluster. A plain `systemctl stop k3s` leaves containerd's overlay
 mounts behind (27 of them today) and the copy would then miss data.
@@ -293,15 +364,37 @@ sudo mount /dev/ocivolume/k3s    /mnt/new-k3s                         # 掛上�
 sudo mount /dev/ocivolume/podman /mnt/new-podman
 sudo rsync -aHAX --numeric-ids /var/lib/rancher/    /mnt/new-k3s/     # -X 保留 SELinux 標籤,少了它 k3s 起不來
 sudo rsync -aHAX --numeric-ids /var/lib/containers/ /mnt/new-podman/
-sudo du -sb /var/lib/rancher /mnt/new-k3s /var/lib/containers /mnt/new-podman   # 逐 byte 比對兩邊大小
 ```
 
-**Expect / 預期:** each pair of byte counts matches. `-X` is not optional:
-without the extended attributes, every file lands with the wrong SELinux label
-and k3s fails to start in a way that looks like a permissions bug.
+`-X` is not optional: without the extended attributes every file lands with the
+wrong SELinux label and k3s fails to start in a way that reads like a
+permissions bug. Verify with rsync itself rather than with sizes.
 
-*預期:兩兩相等。`-X` 不是可選的:少了擴充屬性,每個檔案都會帶錯 SELinux 標籤,
-k3s 會以看起來像權限問題的方式起不來。*
+*`-X` 不是可選的:少了擴充屬性,每個檔案都會帶錯 SELinux 標籤,k3s 會以看起來像
+權限問題的方式起不來。驗證要用 rsync 本身,不要用大小。*
+
+```bash
+sudo rsync -aHAXn --delete --itemize-changes /var/lib/rancher/    /mnt/new-k3s/      # 空輸出＝完全一致
+sudo rsync -aHAXn --delete --itemize-changes /var/lib/containers/ /mnt/new-podman/
+echo "rancher    舊 $(sudo find /var/lib/rancher -type f | wc -l)  新 $(sudo find /mnt/new-k3s -type f | wc -l)"
+echo "containers 舊 $(sudo find /var/lib/containers -type f | wc -l)  新 $(sudo find /mnt/new-podman -type f | wc -l)"
+```
+
+**Expect / 預期:** both dry-runs print nothing (or only `.d..t......` lines,
+which are directory timestamps and harmless), and the file counts match exactly.
+
+*預期:兩個 dry-run 都沒有輸出(或只有 `.d..t......` 開頭的目錄時間戳,無害),
+檔案數完全相同。*
+
+**問題 / Problem:** `du -sb` shows the two sides differing by tens of KB.
+**解法 / Fix:** not data loss — XFS directory inodes grow as entries are added
+and never shrink, so a long-lived directory reports larger than a freshly
+written copy of the same content. `du` is the wrong instrument here; the rsync
+dry-run above is the authoritative one.
+
+*問題:`du -sb` 顯示兩邊差幾十 KB。解法:不是資料遺失 —— XFS 的目錄 inode 會隨著
+項目增加而膨脹且不會縮回,所以用了很久的目錄會比同樣內容的全新副本大。`du` 在這裡
+是錯的量尺,上面的 rsync dry-run 才是權威。*
 
 ```bash
 sudo umount /mnt/new-k3s /mnt/new-podman                     # 卸下暫時掛載點
