@@ -49,11 +49,15 @@ docs/                 runbook (migration/cutover), OCI security list
   prune runs once on the node (`node/prune-images.sh`, daily timer) instead of
   being copied into four pipelines that would still miss a manual build. With
   no registry here, it never deletes an image a live workload spec names, and
-  keeps the newest `KEEP` (default 2) *distinct* images per `localhost/*` repo
-  in **both** stores so a rollback target survives. Both stores, because
-  dangling-only cleanup silently depends on tag reuse: the three apps that
-  rebuild `:latest` orphan their previous image, snoopy's git-sha tags never
-  orphan anything, and its builds would accumulate untouched.
+  keeps the newest *distinct* images per `localhost/*` repo in both stores.
+  Retention differs by store because they hold images for different reasons:
+  containerd (`KEEP`, default 2) is the only store Kubernetes runs from, so
+  that is where a rollback target has to survive; podman (`PODMAN_KEEP`,
+  default 1) is a build byproduct already handed to containerd, kept only so
+  the next build reuses its layers. Both are swept, because dangling-only
+  cleanup silently depends on tag reuse: the three apps that rebuild `:latest`
+  orphan their previous image, snoopy's git-sha tags never orphan anything, and
+  its builds would accumulate untouched.
 - Migration state and pending steps: `docs/runbook.md`.
 
 *設計規則:app 永遠不安裝叢集級的東西(cert-manager、issuer、Postgres、hook

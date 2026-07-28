@@ -21,19 +21,22 @@
 #   1. anything a running container references (crictl refuses anyway);
 #   2. anything named in a live workload spec — a Deployment scaled to zero, or
 #      a CronJob that only runs at 03:30, still needs its image to exist;
-#   3. the newest ${KEEP} *distinct images* of each localhost/* repository — in
-#      BOTH stores — so there is at least one rollback target. Distinct images,
+#   3. in containerd, the newest ${KEEP} *distinct images* of each localhost/*
+#      repository, so there is at least one rollback target. Distinct images,
 #      not tags: two tags on one build must not count as two. snoopy tags by git
 #      sha, the only app here with a real version history to roll back through.
+#      podman is governed separately by ${PODMAN_KEEP} — see section 1b.
 #
 # 絕不刪除的三層保護:執行中容器引用的、live workload spec 指名的(縮到 0 的
-# Deployment 或每天才跑一次的 CronJob 也算)、以及每個 localhost/* repo 最新的
-# ${KEEP} 個 tag(留回滾點)。沒有 registry,刪掉只能重 build。
+# Deployment 或每天才跑一次的 CronJob 也算)、以及 containerd 裡每個 localhost/*
+# repo 最新的 ${KEEP} 個「不同的 image」(留回滾點)。沒有 registry,刪掉只能重
+# build。podman 另由 ${PODMAN_KEEP} 管,見 1b 段。
 #
 # Usage:
-#   sudo bash prune-images.sh              # prune, KEEP=2
-#   sudo KEEP=3 bash prune-images.sh       # keep three tags per repo
-#   sudo DRY_RUN=1 bash prune-images.sh    # print the plan, delete nothing
+#   sudo bash prune-images.sh                # KEEP=2 (containerd), PODMAN_KEEP=1
+#   sudo KEEP=3 bash prune-images.sh         # three rollback targets in containerd
+#   sudo PODMAN_KEEP=0 bash prune-images.sh  # drop the build cache too
+#   sudo DRY_RUN=1 bash prune-images.sh      # print the plan, delete nothing
 #
 # Normally fired by prune-images.timer (daily 03:00). Safe to run by hand at
 # any time, including mid-deploy: in-use images are refused, not forced.
@@ -43,6 +46,13 @@ set -euo pipefail
 export PATH="/usr/local/bin:${PATH}"
 
 KEEP="${KEEP:-2}"
+# podman's copy is build cache, not a rollback source — containerd already holds
+# ${KEEP} of each and is the only store Kubernetes can run from. Default 1: keep
+# the current build so the next one reuses its layers instead of redoing every
+# app layer from the base image (a cold snoopy build measured 59s). 2 would be
+# pointless: the three `:latest` pipelines never have a second tagged image to
+# keep, and a second snoopy build here would serve nothing.
+PODMAN_KEEP="${PODMAN_KEEP:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 K3S="/usr/local/bin/k3s"
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
@@ -76,19 +86,33 @@ fi
 # deploy at ~789MB each while `podman images -f dangling=true` reports nothing.
 #
 # The sha scheme is the better one — `:latest` cannot tell you which commit is
-# running — so the fix belongs here, not in snoopy's pipeline. Same retention
-# rule as containerd below, for the same reason: keep a rollback source, drop
-# the rest.
+# running — so the fix belongs here, not in snoopy's pipeline.
+#
+# Retention is its own knob (${PODMAN_KEEP}, default 0) rather than containerd's
+# ${KEEP}, because the two stores hold these images for different reasons.
+# containerd's copy is what actually runs and what a rollback needs. podman's is
+# a byproduct of the build, already handed to containerd by `podman save`, and
+# keeping it buys only layer cache for the next build of the same app — which is
+# why the default is 1 rather than 0: the duplicate copy costs ~545MB on a
+# volume at 4% use, and saves rebuilding every app layer on the next deploy.
+# Only names under localhost/ are considered either way, so base
+# images (docker.io/library/python:3.11-slim, node:22-alpine, ...) are never
+# candidates: those are the cache that actually pays for itself on a slow arm64
+# pull.
 #
 # 只清 dangling 不夠:三個 app 每次重用 `:latest`,舊 image 因此失去 tag 變成
 # dangling 才被收走;snoopy 用 git sha 當 tag,永遠沒有 tag 被搶走,所以一個都不會
 # 變 dangling,每次部署就多積一份。sha 才是比較好的做法,所以修在這裡而不是改
-# snoopy。
-log "podman: retaining newest ${KEEP} per localhost/* repository"
+# snoopy。保留數獨立成 ${PODMAN_KEEP}(預設 0)而非沿用 ${KEEP}:containerd 那份
+# 是實際在跑、回滾要用的;podman 那份只是 build 的副產品,`podman save` 之後已經
+# 交給 containerd,留著只換到下次 build 的圖層快取 —— 預設 1 而非 0 的理由:那份
+# 重複約佔 545MB,而卷才用了 4%,換到的是下次部署不必從基底映像重跑所有應用層。
+# 無論設多少,只有 localhost/ 開頭的會被考慮,基底映像永遠不在候選內。
+log "podman: retaining newest ${PODMAN_KEEP} per localhost/* repository"
 PODMAN_PLAN="$(mktemp)"
 trap 'rm -f "${PODMAN_PLAN}" "${PLAN:-}"' EXIT
 
-python3 - "${KEEP}" >"${PODMAN_PLAN}" <<'PYEOF'
+python3 - "${PODMAN_KEEP}" >"${PODMAN_PLAN}" <<'PYEOF'
 import json, subprocess, sys
 
 keep = int(sys.argv[1])
@@ -110,12 +134,16 @@ for img in images:
 emitted = set()
 for repo, tags in repos.items():
     ranked = sorted(tags, key=lambda t: t[2], reverse=True)
+    # keep == 0 means retain nothing: the guard matters because the loop below
+    # only stops once it has collected `keep` ids, so without it a zero would
+    # fall through and keep every one of them — the exact opposite.
     keep_ids = []
-    for _, img_id, _, _ in ranked:
-        if img_id not in keep_ids:
-            keep_ids.append(img_id)
-        if len(keep_ids) == keep:
-            break
+    if keep > 0:
+        for _, img_id, _, _ in ranked:
+            if img_id not in keep_ids:
+                keep_ids.append(img_id)
+            if len(keep_ids) == keep:
+                break
     for name, img_id, _, size in ranked:
         # podman lists an image once per tag, each carrying the full Names list,
         # so the same ref shows up more than once; emitting it twice would make
