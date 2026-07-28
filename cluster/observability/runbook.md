@@ -130,12 +130,27 @@ metrics node-exporter exposes.
 *安裝 systemd timer,產生 node-exporter 會吐出的 image/log textfile 指標。*
 
 ```bash
-sudo install -m 0644 cluster/observability/scripts/observability-metrics.service /etc/systemd/system/   # unit
-sudo install -m 0644 cluster/observability/scripts/observability-metrics.timer   /etc/systemd/system/   # timer
-chmod +x cluster/observability/scripts/image-metrics.sh cluster/observability/scripts/log-size.sh       # exec bit
-sudo systemctl daemon-reload
-sudo systemctl enable --now observability-metrics.timer   # start + run on boot
-sudo systemctl start observability-metrics.service        # run once now
+sudo bash cluster/observability/scripts/install-metrics-timer.sh   # scripts → /usr/local/sbin, units, enable timer
+sudo systemctl start observability-metrics.service                 # run once now, don't wait 5 minutes
+```
+
+**問題 / Problem:** pointing `ExecStart` straight at the checkout
+(`/home/opc/platform/cluster/observability/scripts/*.sh`) fails with
+`203/EXEC … Permission denied` even at mode 0755.
+
+*問題:unit 直接指向 checkout 裡的腳本會 203/EXEC 失敗,即使權限已是 0755。*
+
+**解法 / Fix:** SELinux is Enforcing and `/home` is `user_home_t`, which
+systemd's `init_t` may not execute — it is a label problem, not a mode problem.
+The installer copies both scripts to `/usr/local/sbin` (`bin_t`) and
+`restorecon`s them. Re-run it after any `git pull` that touches either script.
+
+*解法:SELinux Enforcing 下 `/home` 是 `user_home_t`,systemd 不能執行 —— 這是
+標籤問題不是權限問題。安裝器把腳本複製到 `/usr/local/sbin`(`bin_t`)並
+`restorecon`。腳本有變動就要重跑安裝器。*
+
+```bash
+ls -Z /usr/local/sbin/image-metrics.sh   # 應為 system_u:object_r:bin_t:s0
 ```
 
 **Expect / 預期:** `ls /var/lib/node_exporter/textfile_collector/` shows

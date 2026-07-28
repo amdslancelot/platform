@@ -54,6 +54,7 @@ alloy/alloy.yaml               Alloy DaemonSet + config (remote_write → Grafan
 scripts/image-metrics.sh       host: image count/size → textfile .prom
 scripts/log-size.sh            host: per-pod log dir size → textfile .prom
 scripts/observability-metrics.{service,timer}   systemd: run the two scripts every 5m
+scripts/install-metrics-timer.sh   installs both scripts to /usr/local/sbin (SELinux) + the units
 runbook.md                     command-led install + verify (Grafana Cloud, secrets, rotation, prune)
 ```
 
