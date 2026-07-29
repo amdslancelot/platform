@@ -1,0 +1,59 @@
+# transigen — Next.js on :3000 behind Traefik. Needs Postgres and outbound
+# internet (Google OAuth, YouTube Data API, Spotify API).
+# transigen 是 Traefik 後面的 Next.js(:3000),需要 Postgres 與對外網路
+# (Google OAuth、YouTube Data API、Spotify API)。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: transigen
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress
+  namespace: transigen
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+        # kubelet 探針:實測來源是 cni0 閘道 10.42.0.1,節點位址一併列入
+        - ipBlock: { cidr: 10.42.0.1/32 }
+        - ipBlock: { cidr: 10.0.0.240/32 }
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: transigen
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: data }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16   # pod 網段
+              - 10.43.0.0/16   # service 網段
+              - 10.0.0.0/24    # 節點 VCN 子網:kubelet :10250 與 API server :6443 在此

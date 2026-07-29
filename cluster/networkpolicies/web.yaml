@@ -1,0 +1,50 @@
+# web / lans-h-site — static Alpine nginx on :80, apex lans-h.cc + www 301.
+# No database, no outbound API calls, no httpGet probes.
+# 靜態站:不碰資料庫、不對外呼叫、沒有 httpGet 探針。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: web
+spec:
+  podSelector: {}                 # 選中 namespace 內所有 pod
+  policyTypes: [Ingress, Egress]  # 兩個方向都轉為 default-deny
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress
+  namespace: web
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Traefik(含 svclb-traefik)都在 kube-system
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+        # 此 app 目前沒有 httpGet 探針,保留這兩條以免日後加了探針卻忘了開。
+        # 10.42.0.1 是 cni0 閘道,實測是 kubelet 探針的來源位址。
+        - ipBlock: { cidr: 10.42.0.1/32 }
+        - ipBlock: { cidr: 10.0.0.240/32 }
+      ports:
+        - { protocol: TCP, port: 80 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: web
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # DNS —— 缺這條連 service 名稱都解析不出來
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # 靜態站不需要任何其他出向流量,故不放行對外網際網路

@@ -1,0 +1,46 @@
+# data / postgres — the shared database for snoopy, gelp and transigen.
+#
+# INGRESS ONLY in this pass. Postgres egress is deliberately left unrestricted:
+# it is the shared dependency for three apps, so a mistake there has the largest
+# blast radius. Restricting it is worth doing as a separate change — see
+# cluster/networkpolicies/README.md.
+#
+# 這一輪只管 ingress。刻意不限制 Postgres 的 egress:它是三個 app 的共用依賴,
+# 在那裡出錯影響半徑最大,值得獨立成一次可單獨驗證的變更。
+#
+# Probes are `exec` (pg_isready) — they run inside the container and involve no
+# network, so no kubelet ingress rule is needed for them.
+# 探針是 exec(pg_isready),在容器內執行、不走網路,所以不需要為它開 kubelet 入向。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: data
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]     # 只轉 ingress 為 default-deny,egress 不動
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-apps
+  namespace: data
+spec:
+  podSelector:
+    matchLabels: { app: postgres }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # 只有這三個 app 的 namespace 連得到 5432
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: snoopy }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: gelp }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: transigen }
+        # 節點本身:`kubectl port-forward` 是由節點對 pod 建立連線,留著才能做維運除錯。
+        # 這不算放寬:任何能在節點上開 port-forward 的人,本來就能 `kubectl exec` 進去。
+        - ipBlock: { cidr: 10.0.0.240/32 }
+      ports:
+        - { protocol: TCP, port: 5432 }

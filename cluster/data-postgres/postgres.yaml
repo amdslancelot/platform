@@ -10,6 +10,22 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: data
+  # Pod Security Admission (audit finding #5, added 2026-07-28) — `baseline`,
+  # not `restricted`: the official postgres image starts as root and drops to
+  # uid 999 via gosu, so `restricted` is not reachable without also chowning the
+  # PVC data dir (that is Phase B-7, and it needs a maintenance window).
+  # `warn`/`audit` only, never `enforce` — see cluster/namespaces.yaml.
+  #
+  # PSA:用 `baseline` 而非 `restricted` —— 官方 postgres image 是先以 root 啟動、
+  # 再用 gosu 降到 uid 999,不先 chown PVC 資料目錄就達不到 `restricted`
+  # (那是 Phase B-7,需要維護窗口)。同樣只上 warn/audit,不上 enforce。
+  #
+  # NOTE: this changes the Namespace object only. The Deployment/PVC spec below
+  # is untouched, per the HANDOVER RULE above.
+  # 註:這裡只動 Namespace 物件,下面的 Deployment/PVC 依上述 HANDOVER RULE 未更動。
+  labels:
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline
 ---
 # postgres-secret is NOT defined here on purpose — a Secret's value would be a
 # plaintext password committed to git. Create it once, before applying this

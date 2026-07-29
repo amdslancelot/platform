@@ -2,27 +2,63 @@
 # exists). `data` is created in data-postgres/postgres.yaml alongside the
 # server it hosts. my_website (lans-h-site) lives in `web`; it was moved out of
 # `default` on 2026-07-26 (its manifests originally predated namespacing).
+#
+# Pod Security Admission (audit finding #5, added 2026-07-28):
+#   `warn` + `audit` at `restricted`, deliberately WITHOUT `enforce`.
+#   All five first-party workloads currently violate `restricted` on the same
+#   four counts (allowPrivilegeEscalation, capabilities.drop, runAsNonRoot,
+#   seccompProfile) because their manifests declare no securityContext at all.
+#   Setting `enforce` now would not touch running pods — it would silently block
+#   the NEXT pod creation, so the cluster would look healthy until a deploy or a
+#   node reboot, and then nothing would come back. `warn` surfaces the identical
+#   message without that trap. See docs/security-posture-audit-remediation-plan.md §1.4.
+#
+#   PSA(稽核第 5 項,2026-07-28 加入):只上 `warn`+`audit`,刻意不上 `enforce`。
+#   五個自有 workload 目前都違反 `restricted` 的同樣四項,因為 manifest 根本沒宣告
+#   securityContext。現在上 `enforce` 不會動到正在跑的 pod,而是會安靜地擋掉「下一次」
+#   pod 建立 —— 叢集看起來健康,直到某次部署或節點重開才發現全部起不來。
+#
+#   `audit` writes to the API-server audit log, which is not enabled yet
+#   (Phase C, finding #6) — the label is inert until then, but set now so it
+#   activates automatically when Phase C lands.
+#   `audit` 寫進 API server 的 audit log,而那個還沒開(Phase C),所以目前是空轉的,
+#   先標上是為了 Phase C 一做就自動生效。
 apiVersion: v1
 kind: Namespace
 metadata:
   name: platform        # platform-owned cluster plumbing: wildcard cert, TLSStore, www redirect
+  labels:
+    pod-security.kubernetes.io/warn: restricted     # 無 workload,直接標最嚴
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: snoopy
+  labels:
+    pod-security.kubernetes.io/warn: restricted     # 建立不合規 pod 時印警告,但放行
+    pod-security.kubernetes.io/audit: restricted    # 同時記進 audit log(待 Phase C 生效)
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: gelp
+  labels:
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: transigen
+  labels:
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: web           # my_website / lans-h-site (apex lans-h.cc + www 301)
+  labels:
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

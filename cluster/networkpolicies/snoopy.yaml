@@ -1,0 +1,64 @@
+# snoopy — Discord bot. NO Service and NO Ingress: it is outbound-only, so it
+# needs no Traefik ingress at all. It does need Postgres and the internet
+# (Discord gateway, Gemini API, Google Calendar API).
+# snoopy 是 Discord bot,沒有 Service 也沒有 Ingress,純出向。
+# 它需要 Postgres 與對外網路(Discord gateway、Gemini API、Google Calendar API)。
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: snoopy
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-probes
+  namespace: snoopy
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    # 唯一的入向來源是節點上的 kubelet,用來跑 httpGet 探針(:8080)。
+    # 實測日誌顯示探針來源是 cni0 閘道 10.42.0.1(不是節點位址),兩個都列入。
+    # 註:host-originated 流量在這個 CNI 上似乎不經過 ingress 強制路徑,
+    #     所以這條偏向縱深防禦而非承重規則 —— 但路徑若改變它就是承重的。
+    - from:
+        - ipBlock: { cidr: 10.42.0.1/32 }
+        - ipBlock: { cidr: 10.0.0.240/32 }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: snoopy
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Postgres —— 只到 data namespace 的 5432
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: data }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    # 對外網際網路,但排除叢集內部與節點網段(擋掉橫向移動與直接打 kubelet/API server)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16   # pod 網段
+              - 10.43.0.0/16   # service 網段
+              - 10.0.0.0/24    # 節點 VCN 子網:kubelet :10250 與 API server :6443 在此
