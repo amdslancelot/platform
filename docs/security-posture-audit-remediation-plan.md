@@ -926,16 +926,69 @@ INFO aiohttp.access: 10.42.0.1 [...] "GET /health HTTP/1.1" 200 "kube-probe/1.36
 ```
 
 Probes arrive from **`10.42.0.1`**, the `cni0` bridge gateway. Both addresses are
-now admitted. Note that probes kept working throughout — on this CNI,
-host-originated traffic appears not to traverse the ingress enforcement path, so
-this rule is defence-in-depth rather than load-bearing today. It becomes
-load-bearing the moment that path changes, which is reason enough to have it
-correct.
+now admitted.
 
-*探針來自 **`10.42.0.1`**,也就是 `cni0` 橋接閘道。現在兩個位址都放行。要注意的是探針
-全程都正常 —— 在這個 CNI 上,host-originated 流量似乎不經過 ingress 強制路徑,所以這條
-規則目前是縱深防禦而非承重規則。但路徑一改變它就是承重的,這就足以構成把它寫對的
-理由。*
+*探針來自 **`10.42.0.1`**,也就是 `cni0` 橋接閘道。現在兩個位址都放行。*
+
+### 5.4 The probe hazard was overstated — tested and disproven.
+
+*探針風險被我高估了 —— 已實測推翻。*
+
+Both the plan and the policy README originally asserted that ingress default-deny
+would drop kubelet probes, mark the pod unready and take the site down. That was
+stated as fact before it was tested. **On 2026-07-29 it was tested and it is false
+for this cluster.**
+
+*本計畫與政策 README 原本都斷言 ingress default-deny 會擋掉 kubelet 探針、讓 pod 被判
+unready、使網站掛掉。那句話在被驗證之前就被當成事實寫下來了。**2026-07-29 實測結果:
+對這個叢集而言那是錯的。***
+
+Method — a throwaway `probe-test` namespace, one deployment built from a local
+image with an `httpGet` readiness probe (`periodSeconds: 2`,
+`failureThreshold: 2`), `readinessProbe` only so a failure would show as unready
+rather than as restarts:
+
+*方法 —— 一個丟棄用的 `probe-test` namespace,一個以本機映像建立、帶 `httpGet`
+readiness 探針的 deployment(每 2 秒一次、失敗 2 次即判定),只用 readinessProbe,
+這樣失敗會表現為 unready 而不是重啟:*
+
+| Stage | Setup | Result |
+|---|---|---|
+| A | no policy | `1/1 Ready` — baseline |
+| B | `default-deny-ingress`, **no probe allowance** | **`1/1 Ready`**, sustained for >2.5 min |
+| Control | probe-test pod → a policied app pod `:3000` | **refused** — the policy really was enforcing |
+| Control | probe-test pod → its own `127.0.0.1:80` | 200 — nginx genuinely serving |
+
+The access log settles it — probes never stopped landing:
+
+*access log 是決定性的 —— 探針從未中斷:*
+
+```
+10.42.0.1 - - [29/Jul/2026:21:21:39] "GET / HTTP/1.1" 200 "kube-probe/1.36"
+```
+
+**Conclusion** — kube-router enforces ingress for pod-to-pod traffic but exempts
+host-originated traffic, so the two `ipBlock` rules are **defence in depth, not
+load-bearing**. They stay, because "currently unnecessary" and "permanently
+unnecessary" are different claims: a CNI swap, a kube-router upgrade, or probing
+from a second node would make them load-bearing, and by then nobody would recall
+why they were missing.
+
+***結論*** *—— kube-router 對 pod 對 pod 的流量強制 ingress,但豁免 host-originated
+流量,所以那兩條 `ipBlock` 是**縱深防禦而非承重規則**。保留它們,因為「現在不需要」和
+「永遠不需要」是兩件不同的事:換 CNI、升級 kube-router、或從第二個節點探測,它就變成
+承重的,而那時沒人會記得為什麼當初沒寫。*
+
+> 🎯 **Interview / 面試考點** — this is the better version of the "tell me about a
+> time you were wrong" answer, because the mistake was caught by a test the
+> candidate chose to run on his own claim. The shape is: I asserted a failure mode,
+> I wrote a control for it, then I built a throwaway rig to check whether the
+> control was actually doing anything — and it wasn't. Keeping the rule anyway,
+> with the reason written down, is the judgement call worth defending.
+>
+> *這是「講一次你錯了的經驗」更好的版本,因為錯誤是被自己主動跑的測試抓到的。結構是:
+> 我斷言了一個失敗模式、為它寫了控制措施、然後搭一個丟棄用的環境去檢查那個控制措施
+> 到底有沒有在作用 —— 結果沒有。而仍然保留它、並把理由寫下來,才是值得辯護的判斷。*
 
 ---
 

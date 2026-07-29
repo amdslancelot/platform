@@ -41,18 +41,41 @@ finding #4 sets out to block. See `docs/security-posture-audit-remediation-plan.
    `postgres.data.svc` and everything fails. This is the most common way to take
    a cluster down with a NetworkPolicy.
    *沒有明確放行 `kube-dns:53`,app 連 `postgres.data.svc` 都解析不出來,全部會壞。*
-2. **kubelet health probes.** `gelp`, `transigen` and `snoopy` use `httpGet`
-   probes, which the kubelet issues **from the node**. Ingress default-deny blocks
-   them, the pod is marked unready and is dropped from its Service endpoints —
-   the site goes down even though the container is healthy. Hence the
-   `10.0.0.240/32` ingress rule in each app policy.
-   *`gelp`、`transigen`、`snoopy` 用 `httpGet` 探針,是 kubelet **從節點**發起的。
-   ingress default-deny 會擋掉它,pod 被判 unready 並從 Service endpoints 移除 ——
-   容器明明健康,網站卻掛了。所以每個 app 政策都有那條 `10.0.0.240/32` 的 ingress。*
+2. **kubelet health probes — a real hazard in general, but NOT on this cluster.**
+   `gelp`, `transigen` and `snoopy` use `httpGet` probes, which the kubelet issues
+   from the node as a real TCP connection into the pod. The textbook failure is
+   that ingress default-deny drops them, the pod is marked unready and is dropped
+   from its Service endpoints, and the site goes down while the container is
+   perfectly healthy.
+   *`gelp`、`transigen`、`snoopy` 用 `httpGet` 探針,由節點上的 kubelet 對 pod 開真實
+   TCP 連線。教科書上的失敗模式是:ingress default-deny 擋掉它,pod 被判 unready 並從
+   Service endpoints 移除,容器明明健康網站卻掛了。*
+
+   **This was tested here on 2026-07-29 and it does not happen.** A throwaway
+   deployment with an `httpGet` readiness probe, under `default-deny-ingress` with
+   no probe allowance, stayed `1/1 Ready` and logged `kube-probe/1.36` 200s from
+   `10.42.0.1` every 2 seconds indefinitely. The control in the same test confirms
+   the policy was genuinely enforcing: a pod-to-pod connection to a policied app
+   pod was refused. So on kube-router here, host-originated traffic bypasses
+   ingress enforcement.
+   ***這件事在 2026-07-29 實測過,不會發生。*** *一個帶 `httpGet` readiness 探針的丟棄用
+   deployment,在 `default-deny-ingress` 且完全沒有放行探針的情況下,持續維持 `1/1 Ready`,
+   access log 每 2 秒一筆來自 `10.42.0.1` 的 `kube-probe/1.36` 200。同一個測試的對照組
+   證實政策確實在強制:pod 對 pod 連到已套政策的 app pod 被拒絕。所以在這裡的 kube-router
+   上,host-originated 流量會繞過 ingress 強制。*
+
+   The `10.42.0.1/32` and `10.0.0.240/32` ingress rules are therefore **defence in
+   depth, not load-bearing today**. They are kept because "currently unnecessary"
+   and "permanently unnecessary" are different claims — a CNI swap, a kube-router
+   upgrade, or probing from a second node would make them load-bearing, and by
+   then nobody would remember why they were absent.
+   *因此那兩條 `ipBlock` 規則目前是**縱深防禦,不是承重規則**。保留它們的理由是:
+   「現在不需要」和「永遠不需要」是兩件不同的事 —— 換 CNI、升級 kube-router、或改成從
+   第二個節點探測,它就會變成承重的,而那時沒人會記得為什麼當初沒寫。*
 
    `postgres` uses `exec` probes (`pg_isready`), which run inside the container
-   and involve no network — unaffected.
-   *`postgres` 用的是 `exec` 探針,在容器內執行、不走網路,不受影響。*
+   and involve no network, so it is unaffected either way.
+   *`postgres` 用的是 `exec` 探針,在容器內執行、不走網路,兩種情況下都不受影響。*
 
 ## Apply order
 

@@ -1,0 +1,497 @@
+<title>Network Topology — louis2 / lans-h.cc</title>
+<style>
+  :root {
+    --paper:      #eef1f5;
+    --card:       #f7f9fb;
+    --ink:        #171c26;
+    --ink-2:      #4a5464;
+    --ink-3:      #7b8595;
+    --rule:       #ccd4de;
+    --rule-soft:  #dfe5ec;
+    --brass:      #8a6018;
+    --brass-bg:   #f3ead8;
+    --allow:      #0c6b74;
+    --allow-bg:   #ddeef0;
+    --deny:       #9c3623;
+    --deny-bg:    #f6e2dd;
+    --host:       #3f4a8a;
+    --host-bg:    #e5e8f5;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:     #0f1319;
+      --card:      #161c25;
+      --ink:       #e4e9f0;
+      --ink-2:     #a3aebd;
+      --ink-3:     #6f7a8a;
+      --rule:      #2c3442;
+      --rule-soft: #222a35;
+      --brass:     #d9a94e;
+      --brass-bg:  #2a2213;
+      --allow:     #4fbcc6;
+      --allow-bg:  #10282b;
+      --deny:      #e5836c;
+      --deny-bg:   #2d1a15;
+      --host:      #9aa6e0;
+      --host-bg:   #1b1f33;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #0f1319;
+    --card:      #161c25;
+    --ink:       #e4e9f0;
+    --ink-2:     #a3aebd;
+    --ink-3:     #6f7a8a;
+    --rule:      #2c3442;
+    --rule-soft: #222a35;
+    --brass:     #d9a94e;
+    --brass-bg:  #2a2213;
+    --allow:     #4fbcc6;
+    --allow-bg:  #10282b;
+    --deny:      #e5836c;
+    --deny-bg:   #2d1a15;
+    --host:      #9aa6e0;
+    --host-bg:   #1b1f33;
+  }
+  :root[data-theme="light"] {
+    --paper:     #eef1f5;
+    --card:      #f7f9fb;
+    --ink:       #171c26;
+    --ink-2:     #4a5464;
+    --ink-3:     #7b8595;
+    --rule:      #ccd4de;
+    --rule-soft: #dfe5ec;
+    --brass:     #8a6018;
+    --brass-bg:  #f3ead8;
+    --allow:     #0c6b74;
+    --allow-bg:  #ddeef0;
+    --deny:      #9c3623;
+    --deny-bg:   #f6e2dd;
+    --host:      #3f4a8a;
+    --host-bg:   #e5e8f5;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+
+  /* ---- masthead ---- */
+  .eyebrow {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--brass); margin: 0 0 .7rem;
+  }
+  h1 {
+    font-size: clamp(1.55rem, 3.4vw, 2.3rem); line-height: 1.14; margin: 0 0 .9rem;
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 620;
+  }
+  .standfirst { max-width: 60ch; color: var(--ink-2); margin: 0 0 1.4rem; font-size: 1.02rem; }
+  .facts {
+    display: flex; flex-wrap: wrap; gap: .4rem .5rem;
+    font-family: var(--mono); font-size: .73rem; margin: 0 0 2.6rem; padding: 0; list-style: none;
+  }
+  .facts li {
+    border: 1px solid var(--rule); border-radius: 2px; padding: .2rem .5rem;
+    color: var(--ink-2); background: var(--card);
+  }
+  .facts b { color: var(--ink); font-weight: 600; }
+
+  h2 {
+    font-size: .78rem; font-family: var(--mono); letter-spacing: .13em; text-transform: uppercase;
+    color: var(--ink-3); margin: 3.2rem 0 1rem; padding-bottom: .45rem;
+    border-bottom: 1px solid var(--rule); font-weight: 500;
+  }
+  h2:first-of-type { margin-top: 0; }
+  .note { color: var(--ink-2); max-width: 66ch; font-size: .93rem; margin: 0 0 1.2rem; }
+  .note code, td code, .layer-meta code { font-family: var(--mono); font-size: .88em; }
+
+  /* ---- nested boundary layers ---- */
+  .diagram { overflow-x: auto; padding-bottom: .4rem; }
+  .layer {
+    position: relative; border: 1px solid var(--rule); border-radius: 3px;
+    padding: 1.65rem 1rem 1rem; margin: 0; background: var(--card);
+    min-width: 640px;
+  }
+  .layer + .layer { margin-top: 1rem; }
+  .layer > .layer { min-width: 0; }
+  .layer-tag {
+    position: absolute; top: -.62rem; left: .8rem;
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .1rem .45rem; border-radius: 2px; font-weight: 600;
+  }
+  .layer-meta {
+    font-family: var(--mono); font-size: .7rem; color: var(--ink-3);
+    margin: -.5rem 0 .9rem; line-height: 1.5;
+  }
+  /* boundary = a control point, coloured by which control enforces it */
+  .b-edge   { border-color: var(--ink-3); border-style: dashed; }
+  .b-edge   > .layer-tag { background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule); }
+  .b-oci    { border-color: var(--brass); }
+  .b-oci    > .layer-tag { background: var(--brass-bg); color: var(--brass); }
+  .b-host   { border-color: var(--host); }
+  .b-host   > .layer-tag { background: var(--host-bg); color: var(--host); }
+  .b-k8s    { border-color: var(--rule); }
+  .b-k8s    > .layer-tag { background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule); }
+  .b-netpol { border-color: var(--allow); border-width: 2px; }
+  .b-netpol > .layer-tag { background: var(--allow-bg); color: var(--allow); }
+
+  /* ---- pods / boxes ---- */
+  .grid { display: grid; gap: .8rem; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); }
+  .g4 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .pod {
+    border: 1px solid var(--rule-soft); border-radius: 2px; padding: .6rem .7rem;
+    background: var(--paper); display: flex; flex-direction: column; gap: .18rem;
+  }
+  .pod-name { font-family: var(--mono); font-size: .8rem; font-weight: 600; }
+  .pod-line { font-family: var(--mono); font-size: .68rem; color: var(--ink-3); }
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: .61rem; font-weight: 600;
+    padding: .04rem .34rem; border-radius: 2px; letter-spacing: .04em;
+  }
+  .p-root { background: var(--deny-bg); color: var(--deny); }
+  .p-user { background: var(--allow-bg); color: var(--allow); }
+  .p-none { background: var(--rule-soft); color: var(--ink-3); }
+
+  /* ---- tables ---- */
+  .tbl-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .86rem; min-width: 520px; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: .67rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; border-bottom: 1px solid var(--rule);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.m { font-family: var(--mono); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .yes { color: var(--allow); font-weight: 600; }
+  .no  { color: var(--deny);  font-weight: 600; }
+  .arrow { color: var(--ink-3); }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; margin: 1rem 0 0; padding: 0; list-style: none;
+    font-family: var(--mono); font-size: .69rem; color: var(--ink-2);
+  }
+  .legend span { display: inline-block; width: 1.5rem; height: 0; vertical-align: middle;
+                 margin-right: .35rem; border-top-width: 2px; border-top-style: solid; }
+
+  footer {
+    margin-top: 3.4rem; padding-top: 1.1rem; border-top: 1px solid var(--rule);
+    font-size: .82rem; color: var(--ink-3); max-width: 72ch;
+  }
+  footer strong { color: var(--ink-2); }
+  a { color: var(--allow); }
+  a:focus-visible, .pod:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Internal · unredacted</p>
+  <h1>Network topology — <code style="font-family:var(--mono);font-size:.82em">louis2</code> / lans-h.cc</h1>
+  <p class="standfirst">
+    What sits where on the single OCI node, and what can reach what. Every nested
+    border below is a trust boundary labelled with <em>the control that enforces
+    it</em> — not a decorative container.
+  </p>
+  <ul class="facts">
+    <li><b>A1.Flex</b> 2 OCPU / 12 GB aarch64</li>
+    <li>Oracle Linux 9</li>
+    <li>k3s <b>v1.36.2+k3s1</b></li>
+    <li>single node, no HA</li>
+    <li>11 namespaces</li>
+    <li>14 NetworkPolicies</li>
+    <li>measured <b>2026-07-29</b></li>
+  </ul>
+
+  <h2>The stack, outside in</h2>
+
+  <div class="diagram">
+
+    <div class="layer b-edge">
+      <span class="layer-tag">Internet</span>
+      <p class="layer-meta">
+        Cloudflare DNS holds <code>lans-h.cc</code> and <code>*.lans-h.cc</code> →
+        <code>92.5.135.46</code>. Cloudflare is also the ACME DNS-01 solver target,
+        so certificate issuance and name resolution share one credential.
+      </p>
+
+      <div class="layer b-oci">
+        <span class="layer-tag">OCI security list — the only packet filter</span>
+        <p class="layer-meta">
+          Ingress allowed on <code>80</code>, <code>443</code>, <code>9000</code> only.
+          Host <code>firewalld</code> is deliberately <b>disabled</b> — a single cloud-console
+          rule is the sole layer in front of the node. Finding #8.
+        </p>
+
+        <div class="layer b-host">
+          <span class="layer-tag">Node louis2 — SELinux enforcing (targeted)</span>
+          <p class="layer-meta">
+            <code>enp0s6 10.0.0.240/24</code> · <code>cni0 10.42.0.1/24</code> ·
+            containerd confined to <code>container_runtime_t</code> · <code>rpcbind</code> disabled 2026-07-28
+          </p>
+
+          <div class="grid g4" style="margin-bottom:1rem">
+            <div class="pod">
+              <span class="pod-name">k3s apiserver</span>
+              <span class="pod-line">:6443 on 0.0.0.0</span>
+              <span class="pod-line"><span class="pill p-root">cluster-admin kubeconfig 644</span></span>
+            </div>
+            <div class="pod">
+              <span class="pod-name">kubelet</span>
+              <span class="pod-line">:10250 on 0.0.0.0</span>
+              <span class="pod-line">issues httpGet probes from <code>10.42.0.1</code></span>
+            </div>
+            <div class="pod">
+              <span class="pod-name">webhook listener</span>
+              <span class="pod-line">:9000 — plain http</span>
+              <span class="pod-line">auth = HMAC only, never TLS</span>
+            </div>
+            <div class="pod">
+              <span class="pod-name">OCI monitoring agent</span>
+              <span class="pod-line">host systemd, host network</span>
+              <span class="pod-line">outside pod networking entirely</span>
+            </div>
+          </div>
+
+          <div class="layer b-k8s">
+            <span class="layer-tag">k3s cluster — Pod Security Admission</span>
+            <p class="layer-meta">
+              pod <code>10.42.0.0/16</code> · service <code>10.43.0.0/16</code> ·
+              CoreDNS <code>10.43.0.10</code> · API service <code>10.43.0.1</code><br>
+              PSA is <code>warn</code> + <code>audit</code> at <code>restricted</code>
+              (<code>baseline</code> on <code>data</code>) — <b>no <code>enforce</code> anywhere,
+              deliberately</b>. Admission failures land on the <em>next</em> pod creation,
+              so enforcing today would look healthy until a deploy or reboot.
+            </p>
+
+            <div class="grid g2" style="margin-bottom:.9rem">
+              <div class="pod">
+                <span class="pod-name">kube-system</span>
+                <span class="pod-line">traefik — LoadBalancer <code>80:31454</code> <code>443:31562</code></span>
+                <span class="pod-line">svclb-traefik (DaemonSet, hostPort)</span>
+                <span class="pod-line">coredns · metrics-server · local-path</span>
+                <span class="pod-line"><span class="pill p-none">no resource limits on traefik</span></span>
+              </div>
+              <div class="pod">
+                <span class="pod-name">cert-manager</span>
+                <span class="pod-line">controller · cainjector · webhook</span>
+                <span class="pod-line">ACME DNS-01 → Cloudflare</span>
+                <span class="pod-line"><span class="pill p-user">ships hardened upstream</span></span>
+              </div>
+              <div class="pod">
+                <span class="pod-name">platform</span>
+                <span class="pod-line">wildcard Certificate · TLSStore default · www 301</span>
+                <span class="pod-line">no pods — cluster plumbing only</span>
+                <span class="pod-line">wildcard is Traefik's default cert, so no app carries <code>tls:</code></span>
+              </div>
+              <div class="pod">
+                <span class="pod-name">default · kube-public · kube-node-lease</span>
+                <span class="pod-line">empty</span>
+                <span class="pod-line"><span class="pill p-none">no PSA label</span></span>
+              </div>
+            </div>
+
+            <div class="layer b-netpol">
+              <span class="layer-tag">NetworkPolicy — default-deny per namespace</span>
+              <p class="layer-meta">
+                Applied 2026-07-28, enforced by kube-router (k3s runs with no
+                <code>--disable</code> flags). Before this the pod network was flat and
+                an app pod could open TCP to the kubelet and the apiserver — verified,
+                not assumed.
+              </p>
+
+              <div class="grid g2">
+                <div class="pod">
+                  <span class="pod-name">web / lans-h-site</span>
+                  <span class="pod-line">Alpine nginx <code>:80</code> · <span class="pill p-root">uid 0</span></span>
+                  <span class="pod-line">apex + www 301</span>
+                  <span class="pod-line">in: traefik, kubelet · out: DNS only</span>
+                  <span class="pod-line"><span class="pill p-none">no resource limits</span></span>
+                </div>
+                <div class="pod">
+                  <span class="pod-name">gelp</span>
+                  <span class="pod-line">Next.js <code>:3000</code> · <span class="pill p-user">uid 1000</span></span>
+                  <span class="pod-line">in: traefik, kubelet</span>
+                  <span class="pod-line">out: DNS, postgres, internet</span>
+                  <span class="pod-line">100m/256Mi → 1/1Gi</span>
+                </div>
+                <div class="pod">
+                  <span class="pod-name">transigen</span>
+                  <span class="pod-line">Next.js <code>:3000</code> · <span class="pill p-user">uid 1000</span></span>
+                  <span class="pod-line">in: traefik, kubelet</span>
+                  <span class="pod-line">out: DNS, postgres, internet</span>
+                  <span class="pod-line">100m/256Mi → 1/1Gi</span>
+                </div>
+                <div class="pod">
+                  <span class="pod-name">snoopy</span>
+                  <span class="pod-line">Python <code>:8080</code> · <span class="pill p-root">uid 0</span></span>
+                  <span class="pod-line"><b>no Service, no Ingress</b> — outbound only</span>
+                  <span class="pod-line">in: kubelet probes only</span>
+                  <span class="pod-line">out: DNS, postgres, Discord/Gemini/Calendar</span>
+                </div>
+                <div class="pod" style="grid-column:1/-1">
+                  <span class="pod-name">data / postgres</span>
+                  <span class="pod-line">postgres:17 <code>:5432</code> · <span class="pill p-root">uid 0</span> · PVC 1Gi (local-path) · QoS Burstable</span>
+                  <span class="pod-line">databases: <code>gelp</code> <code>transigen</code> <code>snoopy_home</code> — one per app, LOGIN-only role each, <code>CONNECT</code> revoked from <code>PUBLIC</code></span>
+                  <span class="pod-line"><b>ingress default-deny</b> — only the three app namespaces and the node, on 5432</span>
+                  <span class="pod-line">egress deliberately unpoliced this pass (largest blast radius) · <code>exec</code> probes, so no network path needed for health</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><b style="font-weight:600;color:var(--ink-2)">Boundary =&nbsp;</b></li>
+    <li><span style="border-color:var(--ink-3);border-top-style:dashed"></span>untrusted</li>
+    <li><span style="border-color:var(--brass)"></span>cloud packet filter</li>
+    <li><span style="border-color:var(--host)"></span>host / kernel controls</li>
+    <li><span style="border-color:var(--allow)"></span>NetworkPolicy</li>
+  </ul>
+  <ul class="legend" style="margin-top:.55rem">
+    <li><b style="font-weight:600;color:var(--ink-2)">State =&nbsp;</b></li>
+    <li><span class="pill p-user">as intended</span></li>
+    <li><span class="pill p-root">risk / open finding</span></li>
+    <li><span class="pill p-none">absent, not yet assessed</span></li>
+  </ul>
+  <p class="note" style="margin:.8rem 0 0;font-size:.85rem">
+    Clay marks a <em>risky state</em>, not a blocked path — so in the before/after table
+    below the mapping inverts: <span class="no">reachable</span> is the bad state and
+    <span class="yes">blocked</span> is the good one. The shared meaning across both
+    colours is conformance to intent, not direction of traffic.
+  </p>
+
+  <h2>Reachability — what the policies allow</h2>
+  <p class="note">
+    NetworkPolicy is an allow-list, and selecting a pod flips that direction to
+    default-deny. Everything not in this table is dropped.
+  </p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>From</th><th>To</th><th>Port</th><th>Why it is required</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="m">kube-system <span class="arrow">→</span></td><td class="m">gelp, transigen</td><td class="m">3000</td><td>Traefik routes <code>Host(...)</code> to the app</td></tr>
+        <tr><td class="m">kube-system <span class="arrow">→</span></td><td class="m">web</td><td class="m">80</td><td>same, for the apex site</td></tr>
+        <tr><td class="m">10.42.0.1 <span class="arrow">→</span></td><td class="m">gelp, transigen, snoopy</td><td class="m">3000 / 8080</td><td><b>kubelet httpGet probes — defence in depth, not load-bearing.</b> Tested 2026-07-29: a probe-bearing pod under default-deny with <em>no</em> allowance stayed Ready, so host-originated traffic bypasses ingress enforcement on this CNI. Kept because a CNI or kube-router change would make it load-bearing</td></tr>
+        <tr><td class="m">any app <span class="arrow">→</span></td><td class="m">kube-system</td><td class="m">53 udp/tcp</td><td><b>DNS.</b> Without it <code>postgres.data.svc</code> will not resolve and everything fails</td></tr>
+        <tr><td class="m">gelp, transigen, snoopy <span class="arrow">→</span></td><td class="m">data</td><td class="m">5432</td><td>its own database — the credential layer still applies on top</td></tr>
+        <tr><td class="m">gelp, transigen, snoopy <span class="arrow">→</span></td><td class="m">0.0.0.0/0 <em>except</em> 10.42/16, 10.43/16, <b>10.0.0.0/24</b></td><td class="m">any</td><td>Google, Discord, Spotify, YouTube. The three exclusions are what keep &ldquo;outbound allowed&rdquo; from also meaning &ldquo;lateral movement allowed&rdquo;</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note" style="margin-top:1rem">
+    <b>Probe type, and why it turned out not to matter here.</b> Probe mechanism decides
+    whether a NetworkPolicy <em>could</em> break health checking at all:
+    <code>httpGet</code> is a real TCP connection opened from the node, so in principle
+    it is exposed to ingress default-deny; <code>exec</code> runs inside the container
+    via the runtime and touches no network, so it is immune by construction. gelp and
+    transigen probe <code>httpGet :3000</code>, snoopy probes <code>httpGet :8080</code>
+    on <code>/health</code> and <code>/ready</code>, lans-h-site declares no probe at
+    all, and postgres uses <code>exec pg_isready</code>. Three of those four probe
+    definitions live in the app repos, not here.
+    <br><br>
+    <b>Tested 2026-07-29: on this cluster none of them is affected.</b> A throwaway pod
+    with an <code>httpGet</code> readiness probe, under default-deny ingress with no
+    allowance at all, stayed Ready and kept logging <code>kube-probe/1.36</code> 200s —
+    while the control in the same test, a pod-to-pod connection to a policied app pod,
+    was refused. kube-router enforces ingress between pods and exempts host-originated
+    traffic. So the probe rules are precautionary; they would become load-bearing on a
+    CNI swap, a kube-router upgrade, or probing from a second node.
+  </p>
+
+  <h2>Reachability — what changed, measured</h2>
+  <p class="note">
+    Same three targets probed from an app pod before any policy existed, and after.
+    This is the empirical form of finding #4: the flat pod network was not a
+    theoretical concern.
+  </p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Target from an app pod</th><th>Before</th><th>After</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="m">10.0.0.240:10250 &nbsp;<span class="arrow">kubelet</span></td><td class="no">reachable</td><td class="yes">blocked</td></tr>
+        <tr><td class="m">10.0.0.240:6443 &nbsp;<span class="arrow">apiserver</span></td><td class="no">reachable</td><td class="yes">blocked</td></tr>
+        <tr><td class="m">10.43.0.1:443 &nbsp;<span class="arrow">API service</span></td><td class="no">reachable</td><td class="yes">blocked</td></tr>
+        <tr><td class="m">10.42.0.15:8080 &nbsp;<span class="arrow">a peer app's pod</span></td><td class="no">reachable</td><td class="yes">blocked</td></tr>
+        <tr><td class="m">postgres.data.svc:5432</td><td class="yes">reachable</td><td class="yes">reachable</td></tr>
+        <tr><td class="m">external APIs :443</td><td class="yes">reachable</td><td class="yes">reachable</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:1rem">
+    The first draft of the egress rule excluded the pod and service CIDRs but not
+    <code>10.0.0.0/24</code> — and the node is where the kubelet and apiserver actually
+    listen. <code>ipBlock</code> filters on IP address, and the node sits outside both
+    cluster ranges, so the rule read as though it closed the hole while leaving it open.
+  </p>
+
+  <h2>Delivery — four triggers, one listener, by choice</h2>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>App</th><th>Trigger</th><th>Test gate</th><th>Release gate</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="m">snoopy</td><td>Actions → SSH → build + rollout</td><td class="m">pytest</td><td class="m yes">v* tag</td></tr>
+        <tr><td class="m">gelp</td><td>Actions <code>next build</code> → HMAC curl <code>:9000</code></td><td class="m yes">build</td><td class="m no">none</td></tr>
+        <tr><td class="m">transigen</td><td>Actions <code>next build</code> → HMAC curl <code>:9000</code></td><td class="m yes">build</td><td class="m no">none</td></tr>
+        <tr><td class="m">my_website</td><td>native GitHub webhook → <code>:9000</code></td><td class="m no">none</td><td class="m no">none</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:1rem">
+    All four end in the same node-local sequence — git reset, podman build, import into
+    containerd, <code>kubectl rollout</code>. There is no registry, so images are named
+    <code>localhost/&lt;app&gt;</code>; a bare <code>app:latest</code> would normalise to
+    <code>docker.io/library/app:latest</code> and containerd would attempt a pull that
+    cannot succeed.
+  </p>
+
+  <h2>What this topology does not yet have</h2>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Gap</th><th>Consequence</th><th>Blocked on</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Workload <code>securityContext</code> — all five first-party pods</td><td>uid 0 for three of them, privilege escalation permitted, default capabilities, default ServiceAccount token mounted</td><td class="m">manifests live in the four <b>app</b> repos, not here</td></tr>
+        <tr><td>Secrets encryption at rest</td><td>every DB password, API token and HMAC secret sits in the datastore as base64</td><td class="m">k3s restart — Phase C</td></tr>
+        <tr><td>kubeconfig is 644 cluster-admin</td><td>any local user on the node becomes cluster-admin</td><td class="m">needs a scoped ServiceAccount kubeconfig first, or all four deploy paths break</td></tr>
+        <tr><td>No apiserver audit log</td><td>nothing to reconstruct an incident from; the PSA <code>audit</code> labels are inert until this lands</td><td class="m">k3s restart — Phase C</td></tr>
+        <tr><td>Resource limits on lans-h-site, Traefik, cert-manager</td><td>BestEffort QoS — first candidates for the OOM killer on a 12 GB node</td><td class="m">app repo / k3s Helm charts</td></tr>
+        <tr><td>Postgres egress unpoliced</td><td>a compromised database could still open outbound connections</td><td class="m">deliberate — separate, independently verifiable change</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    <p>
+      <strong>Internal copy — contains unredacted addressing.</strong> The public
+      diagram in <code>my_website/public</code> is security-redacted; this one is the
+      superset and the two are never synced verbatim. Companion documents:
+      <code>docs/topology.html</code> for architecture and design rationale,
+      <code>docs/security-posture-audit.md</code> for the ranked findings, and
+      <code>docs/security-posture-audit-remediation-plan.md</code> for the phased fixes
+      and verification evidence.
+    </p>
+    <p>
+      Reachability figures measured on the live node; workload and policy state as of
+      2026-07-29, after Phase B-1 to B-4.
+    </p>
+  </footer>
+</div>
