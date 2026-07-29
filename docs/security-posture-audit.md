@@ -65,32 +65,95 @@ ServiceAccount。*
 
 *Kubernetes Secret 未加密儲存 — 高*
 
-**Evidence / 證據**
+**Evidence / 證據** — three configuration checks, all agreeing:
+
+*三項設定檢查,結論一致:*
 
 ```sh
-sudo /usr/local/bin/k3s secrets-encrypt status   # 查詢 k3s 的 secrets 加密狀態
+sudo /usr/local/bin/k3s secrets-encrypt status              # 查詢 k3s 的 secrets 加密狀態
 # → Encryption Status: Disabled, no configuration file found
+sudo ls /var/lib/rancher/k3s/server/cred/encryption-config.json   # 加密設定檔是否存在
+# → No such file or directory
+sudo grep -o 'secrets-encryption' /etc/systemd/system/k3s.service # 啟動參數是否帶加密
+# → (無輸出)
 ```
 
+**Proven at the byte level / 位元組層級的實證(2026-07-29)** — configuration
+checks only show the flag is off. This shows what that actually means on disk,
+without touching a single real credential: plant a harmless marker in a throwaway
+Secret, grep the raw datastore for it, delete the Secret.
+
+*設定檢查只能證明旗標是關的。以下證明它在磁碟上實際代表什麼,而且完全不碰任何真實
+憑證:在一個丟棄用的 Secret 裡種一個無害標記、對原始資料檔 grep 它、然後刪掉。*
+
+```sh
+MARK='CANARY-7f3d9a2b-NOTASECRET-DELETEME'                 # 無害標記,不是真憑證
+kubectl create secret generic canary-probe -n default --from-literal=MARKER="$MARK"
+sudo grep -a -c "$MARK" /var/lib/rancher/k3s/server/db/state.db-wal   # 對原始資料檔搜尋明文
+# → 1                                    ← 明文字面命中,不需要任何解碼步驟
+sudo grep -a -c 'k8s:enc:' /var/lib/rancher/k3s/server/db/state.db*   # 有加密才會有此前綴
+# → 0                                    ← 完全沒有加密封套
+kubectl delete secret canary-probe -n default               # 清除標記
+```
+
+The marker was found by grepping for the **literal plaintext string**. `k8s:enc:`
+is the envelope prefix Kubernetes writes ahead of every encrypted value
+(`k8s:enc:aescbc:v1:<keyname>:`); its total absence means no record in the
+datastore is encrypted.
+
+*標記是直接 grep **字面明文字串**找到的。`k8s:enc:` 是 Kubernetes 在每筆加密值前面
+寫入的封套前綴,它完全不存在,代表資料存放區裡沒有任何一筆是加密的。*
+
+> **Correction to an earlier wording / 更正先前的措辭** — this finding originally
+> said the values sit in the datastore "as base64, which is an encoding, not
+> encryption". That is imprecise, and imprecise in the *reassuring* direction.
+> base64 is the representation `kubectl get secret -o yaml` prints; it is not the
+> storage format. Kubernetes writes resources to the datastore as protobuf, and
+> string fields inside protobuf are raw bytes — so there is no base64 layer on
+> disk at all. Practically: reading these does not require a `base64 -d` step,
+> `grep` is sufficient.
+>
+> *本項原先寫「以 base64 存放,base64 是編碼不是加密」。那不精確,而且是往**令人安心**
+> 的方向不精確。base64 是 `kubectl get secret -o yaml` 的呈現格式,不是儲存格式。
+> Kubernetes 以 protobuf 寫入資料存放區,protobuf 的字串欄位就是原始位元組 ——
+> 磁碟上根本沒有 base64 這一層。實務上的差別:讀它不需要 `base64 -d`,`grep` 就夠了。*
+
 **Impact / 影響** — every app database password, the Cloudflare API token, the
-webhook HMAC secrets, the Google OAuth client secret and the Gemini API key sit
-in the k3s datastore as base64, which is an encoding, not encryption. Anyone who
-can read the datastore file — or restore a backup of it — reads every credential
-in the fleet in plaintext.
+webhook HMAC secrets, the Google OAuth client secret, the Gemini API key and the
+wildcard certificate's private key (`platform/lans-h-cc-tls`) are readable as
+plaintext by anyone who can read the datastore files — **or any backup or snapshot
+of this node**.
 
 *機隊裡每個 app 的資料庫密碼、Cloudflare API token、webhook HMAC secret、Google
-OAuth client secret、Gemini API key,全都以 base64 存在 k3s 的資料存放區裡 ——
-base64 是編碼,不是加密。任何能讀到那個檔案(或還原它的備份)的人,就能拿到機隊全部
-憑證的明文。*
+OAuth client secret、Gemini API key,以及 wildcard 憑證的私鑰
+(`platform/lans-h-cc-tls`),任何能讀到資料存放區檔案的人都能以明文取得 ——
+**這台機器的任何備份或快照也一樣**。*
+
+Note the marker landed in `state.db-wal`, not `state.db`. That is SQLite's
+write-ahead log: new writes are appended there first and folded into the main
+file at a later checkpoint. It makes **no difference to exposure** — both files
+sit in the same directory with the same ownership.
+
+*標記命中的是 `state.db-wal` 而不是 `state.db`。那是 SQLite 的 write-ahead log
+(預寫日誌):新寫入先附加到該檔,之後 checkpoint 才折回主檔。這對曝險程度**沒有任何
+差別** —— 兩個檔案在同一個目錄、同樣的擁有者。*
 
 **Fix / 修法** — enable `--secrets-encryption` on the k3s server and rotate the
 key afterwards. Requires a k3s restart (brief interruption for all four apps);
-back up the datastore first. Verify the same way staging was verified: plant a
-marker string in a Secret and grep the raw datastore for it.
+back up the datastore first. Verify by re-running the canary above and expecting
+the marker to be **absent** and the `k8s:enc:aescbc:` prefix to be **present**.
 
 *在 k3s server 加上 `--secrets-encryption` 並在之後輪替金鑰。需要重啟 k3s(四個
-app 會短暫中斷),事前先備份資料存放區。驗證方式沿用 staging 那套:在 Secret 裡種
-一個標記字串,再對底層資料檔 grep 它。*
+app 會短暫中斷),事前先備份資料存放區。驗證方式是重跑上面那個 canary,預期標記
+**找不到**、而 `k8s:enc:aescbc:` 前綴**出現**。*
+
+⚠️ **Enabling encryption does not fix existing backups / 啟用加密不會修好既有備份** —
+any snapshot taken before Phase C still contains every credential in plaintext.
+Rotation, not just encryption, is what closes that; the backups need handling
+alongside the flag.
+
+*⚠️ Phase C 之前拍的任何快照,裡面仍然是全部憑證的明文。真正關掉這個缺口的是**輪替**
+而不只是加密;備份必須和旗標一起處理。*
 
 > Note: the staging minikube cluster (owned by `snoopy_home`) has had AES-CBC
 > encryption-at-rest enabled and verified at the byte level since
