@@ -76,6 +76,21 @@ spec:
             - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
           ports:
             - { name: postgres, containerPort: 5432 }
+          # Audit finding #10 (Phase B-4, added 2026-07-28). Without these the
+          # pod is QoS class BestEffort — under node memory pressure the shared
+          # database is the FIRST thing the OOM killer selects, and it has no
+          # ceiling either. Measured steady-state usage is ~10m CPU / 39Mi.
+          # Headroom check: postgres 17 defaults are shared_buffers 128MB and
+          # max_connections 100 x work_mem 4MB, so the realistic worst case is
+          # ~530Mi — comfortably under the 1Gi limit.
+          #
+          # 稽核第 10 項。沒有這些,pod 的 QoS 是 BestEffort —— 節點記憶體吃緊時,
+          # 這個三個 app 共用的資料庫會是 OOM killer 第一個挑上的,而且也沒有上限。
+          # 實測穩態用量約 10m CPU / 39Mi;以 postgres 17 預設值估算最壞情況約
+          # 530Mi,離 1Gi 上限仍有餘裕。
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }   # 保證額度,QoS 升為 Burstable
+            limits:   { cpu: 1000m, memory: 1Gi }    # 上限,防止吃光 12GB 節點
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
           readinessProbe:

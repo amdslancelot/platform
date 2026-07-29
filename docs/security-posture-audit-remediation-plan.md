@@ -28,7 +28,7 @@ inspection. **No change has been applied yet.** Where this document contradicts
 | B-1 | Disable `rpcbind` | platform (node) | none | ✅ **done 2026-07-28** |
 | B-2 | PSA labels, `warn`+`audit` only | platform repo | none | ✅ **done 2026-07-28** |
 | B-3 | NetworkPolicy per namespace | platform repo | none if correct | ✅ **done 2026-07-28** |
-| B-4 | `postgres` resource limits | platform repo | **~30s DB restart** | ❌ deferred — needs a window *待開維護窗口* |
+| B-4 | `postgres` resource limits | platform repo | **~30s DB restart** | ✅ **done 2026-07-28** — actual gap ~5s *實際中斷約 5 秒* |
 | B-5 | `securityContext` — gelp, transigen | **gelp / transigen repos** | none (surge rollout) | ❌ not started |
 | B-6 | `lans-h-site` → non-root nginx | **my_website repo** | apex site rollout | ❌ not started |
 | B-7 | `postgres` → non-root | platform repo | **maintenance window** | ❌ not started |
@@ -985,13 +985,43 @@ The warning fires and the pod is still admitted — which is the entire point of
 
 *警告出現,pod 仍然被接受 —— 這正是選 `warn` 而不選 `enforce` 的全部意義。*
 
-**Service continuity / 服務連續性** — throughout B-1 to B-3: `lans-h.cc` 200,
+**B-4, the postgres restart.** `kubectl diff` before applying confirmed the only
+change was the `resources` block. The `Recreate` strategy rollout completed in
+**~5 seconds**, well under the ~30s estimated:
+
+***B-4 的 postgres 重建。** 套用前的 `kubectl diff` 確認唯一變更是 `resources` 區塊。
+`Recreate` 策略的 rollout 在**約 5 秒**完成,遠低於估計的 30 秒:*
+
+```
+deployment "postgres" successfully rolled out       # real 0m4.946s
+QoS=Burstable                                       # 由 BestEffort 升級
+requests={"cpu":"100m","memory":"256Mi"}
+limits={"cpu":"1","memory":"1Gi"}
+pg_isready → /var/run/postgresql:5432 - accepting connections
+psql -tAc "SELECT datname …" → gelp, postgres, snoopy_home, transigen
+```
+
+All four databases intact, and all three apps reconnected with no errors in the
+logs.
+
+*四個資料庫都完好,三個 app 都重新連上,日誌中沒有錯誤。*
+
+**Service continuity / 服務連續性** — throughout B-1 to B-4: `lans-h.cc` 200,
 `gelp.lans-h.cc` 302 (auth redirect, expected), `transigen.lans-h.cc` 200; all
 five pods `1/1 Running` with no new restarts; all three apps still reach
 Postgres.
 
-*B-1 到 B-3 全程:三個站台回應正常,五個 pod 全部 `1/1 Running` 且無新增重啟,
+*B-1 到 B-4 全程:三個站台回應正常,五個 pod 全部 `1/1 Running` 且無新增重啟,
 三個 app 都仍連得到 Postgres。*
+
+**Still without resource limits / 仍然沒有 resource limits** — audit finding #10
+also names `lans-h-site` (my_website repo), Traefik and cert-manager (both
+Helm-managed by k3s). B-4 covered postgres only, because that is the one platform
+owns. The other three remain open.
+
+*稽核第 10 項還點名了 `lans-h-site`(my_website repo)、Traefik 與 cert-manager
+(兩者都由 k3s 的 Helm 管理)。B-4 只處理 postgres,因為那是 platform 擁有的那一個,
+其餘三個仍未處理。*
 
 ---
 
