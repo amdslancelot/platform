@@ -196,7 +196,7 @@
       <text class="t title" x="898" y="462" font-size="15">snoopy</text>
       <text class="t sub" x="898" y="484">discord.py · Gemini · Postgres</text>
       <text class="t sub" x="898" y="503">no Ingress · zero-inbound</text>
-      <text class="t mono" x="898" y="522">img: localhost/snoopy</text>
+      <text class="t mono" x="898" y="522">img: localhost/snoopy-home:&lt;sha&gt;</text>
       <rect class="box b-strip" x="898" y="536" width="150" height="26" rx="13"/>
       <text class="t sub" x="973" y="554" text-anchor="middle" font-size="11">internal only</text>
 
@@ -222,7 +222,7 @@
       <!-- ===== Build model strip ===== -->
       <rect class="box b-strip" x="70" y="792" width="1060" height="66" rx="12"/>
       <text class="t title" x="90" y="820" font-size="14">Image build model — no registry</text>
-      <text class="t sub" x="90" y="842">podman build <tspan class="mono">on the node</tspan> → import into k3s containerd → Deployments use <tspan class="mono">imagePullPolicy: Never</tspan> with <tspan class="mono">localhost/&lt;app&gt;</tspan> names</text>
+      <text class="t sub" x="90" y="842">podman build <tspan class="mono">on the node</tspan> → import into k3s containerd → <tspan class="mono">localhost/&lt;app&gt;</tspan> names + <tspan class="mono">Never</tspan>/<tspan class="mono">IfNotPresent</tspan>, so a registry pull is never attempted</text>
 
       <!-- ===== Deploy triggers strip ===== -->
       <rect class="box b-strip" x="70" y="882" width="1060" height="140" rx="12"/>
@@ -318,6 +318,7 @@
     <div class="card"><h3>One shared cluster</h3><p>A single-node cluster is one failure domain with no HA — <b>but</b> it removes per-app cluster cost and ops entirely and forces clean multi-tenancy (namespaces + per-app DB roles). The tenancy contract scales to more nodes without changing the app contract.</p></div>
     <div class="card"><h3>Platform repo = source of truth</h3><p>Shared infra used to squat in whichever app repo needed it first (Postgres in one app, cert-manager buried in another's deploy script) → duplication and unclear ownership. Centralizing it draws a hard platform/app boundary: apps stay thin and onboarding is self-service.</p></div>
     <div class="card"><h3>No image registry</h3><p>Build on the node and import into k3s containerd (<code>imagePullPolicy: Never</code>, <code>localhost/&lt;app&gt;</code> so containerd never normalizes to <code>docker.io/library</code> and pulls). No registry to run, secure, or pay for and no pull credentials. A registry (GHCR) can slot in later with no app change.</p></div>
+    <div class="card"><h3>Image stores get their own failure domain</h3><p>Building on the node means the image stores are the fastest-growing thing on it, and they used to share a filesystem with the OS, etcd and Postgres — one runaway build could take the cluster down with the disk. Both now sit on dedicated LVs: <code>/var/lib/rancher</code> (containerd, 80G) and <code>/var/lib/containers</code> (podman, 20G), leaving root at 29.5G and 53G of the volume group unallocated. A daily prune bounds each of them, with retention split by what the store is <b>for</b>: <code>KEEP=2</code> in containerd because it is the only store Kubernetes can run from and a rollback target has to survive there, <code>PODMAN_KEEP=1</code> in podman because that copy is a build byproduct kept only for layer cache.</p></div>
     <div class="card"><h3>Wildcard = Traefik's default cert</h3><p>One wildcard means a bigger blast radius and no per-app cert policy — <b>but</b> apps declare zero TLS config (no <code>tls:</code> block) and every new subdomain gets valid TLS automatically. TLS becomes a platform concern, not an app concern.</p></div>
     <div class="card"><h3>Shared Postgres, least-privilege per app</h3><p>One server is a shared resource — <b>but</b> a per-app <code>&lt;app&gt;_rw</code> login-only role scoped to its own database (<code>PUBLIC</code> connect revoked; no <code>SUPERUSER</code>/<code>CREATEDB</code>/<code>CREATEROLE</code>) gives real isolation without N database servers. Provisioning is additive, idempotent, and self-verifying — the script asserts the isolation at the end. No TLS by design — DB traffic never leaves the node.</p></div>
     <div class="card"><h3>Trigger and gate, decoupled</h3><p>Per-app triggers (Actions-SSH / CI→webhook / native webhook) look inconsistent — <b>but</b> each app keeps the trigger that fits it while sharing one <code>:9000</code> HMAC-signed webhook. <b>Trigger</b> is separate from <b>gate</b> (test-gate = build must pass; release-gate = <code>v*</code> tag) — two axes mixed per app.</p></div>
