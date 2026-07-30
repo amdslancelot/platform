@@ -56,7 +56,15 @@ scripts/log-size.sh            host: per-pod log dir size → textfile .prom
 scripts/observability-metrics.{service,timer}   systemd: run the two scripts every 5m
 scripts/install-metrics-timer.sh   installs both scripts to /usr/local/sbin (SELinux) + the units
 runbook.md                     command-led install + verify (Grafana Cloud, secrets, rotation, prune)
+pending.md                     MUST-READ before applying: pre-flight fixes + the open backend decision
 ```
+
+**Read `pending.md` first.** This branch was authored before the Phase B-1..B-4
+hardening landed on `main`; three of the runbook's steps fail silently against the
+NetworkPolicies now in place, and two others are stale.
+
+***先讀 `pending.md`。** 本分支撰寫於 Phase B-1..B-4 加固進 `main` 之前;runbook 有三
+個步驟會被現行的 NetworkPolicy 靜默擋掉,另有兩處已過時。*
 
 See `runbook.md` for the deploy order and the two things monitoring alone does
 NOT fix: **containerd log rotation** and **periodic image prune**.
