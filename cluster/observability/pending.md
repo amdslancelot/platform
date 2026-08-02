@@ -2,12 +2,15 @@
 
 *可觀測性 —— 待修項與未定決策*
 
-Recorded 2026-07-29. Two independent things live here: **§1 must be fixed before
-this stack is applied to the node at all**, and **§2 is a design choice that can
-stay open** — the stack works without deciding it.
+Recorded 2026-07-29, extended 2026-08-02. Three independent things live here:
+**§1 must be fixed before this stack is applied to the node at all**, **§2 is a
+design choice that can stay open** — the stack works without deciding it — and
+**§3 is a machine nobody had counted**, which turns out to answer a different
+question than §2 was asking.
 
-*記錄於 2026-07-29。這裡有兩件互不相干的事:**§1 是這個 stack 上節點之前必須先修
-的**,**§2 是可以先擱著的設計選擇** —— 不決定它 stack 也能上。*
+*記錄於 2026-07-29,2026-08-02 增補。這裡有三件互不相干的事:**§1 是這個 stack 上節點
+之前必須先修的**,**§2 是可以先擱著的設計選擇**(不決定它 stack 也能上),而 **§3 是一
+台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題。*
 
 Branch state: `observability-stack`, 2 commits, based on `883e07f`, **13 commits
 behind `main`**, not pushed, not applied to the node.
@@ -263,17 +266,32 @@ running since 2025-08-26. Do not plan to repurpose it without checking.
 
 *沒動用的 ARM 配額才是真正的選項*
 
+> **Corrected 2026-08-02 — the allowance in this section was stale.** Oracle
+> **halved the Always Free A1 allowance on 2026-06-15** without announcing it
+> (the docs were silently updated): 4 OCPU / 24 GB → **2 OCPU / 12 GB**, i.e.
+> 3,000 → 1,500 OCPU-hours and 18,000 → 9,000 GB-hours per month. The paragraph
+> below originally said 4 / 24 was available; it is **2 / 12**. That happens to
+> land on exactly the size this section recommends, so the recommendation itself
+> survives — but there is now **no spare headroom above it**, and `lansoulot`
+> would be at 100% of its A1 bucket.
+>
+> *2026-08-02 更正 —— 本節原本的配額數字已過時。Oracle 於 **2026-06-15 無預警把
+> Always Free A1 配額砍半**(只默默改了文件):4 OCPU / 24 GB → **2 OCPU / 12 GB**,
+> 即每月 3,000 → 1,500 OCPU-hr、18,000 → 9,000 GB-hr。下面原文寫「4 / 24 可用」,
+> 實際是 **2 / 12**。剛好等於本節建議的規格,所以建議本身仍然成立 —— 但**之上不再
+> 有餘裕**,`lansoulot` 會用滿它 100% 的 A1 額度。*
+
 The `lansoulot` tenancy has **no A1 instance**, so its full Always Free Ampere
-allowance — **4 OCPU / 24 GB** — is available. Running `terraform apply` in
-`lansoulot/` creates one; bumping `shape_ocpus`/`shape_memory_gbs` to **2 / 12**
-costs nothing and removes the single-core risk (on 1 core, TSDB compaction plus a
-wide range query saturates it for seconds — dashboards get sluggish, nothing
-dies).
+allowance — **2 OCPU / 12 GB** (see the correction above) — is available. Running
+`terraform apply` in `lansoulot/` creates one; bumping
+`shape_ocpus`/`shape_memory_gbs` to **2 / 12** costs nothing and removes the
+single-core risk (on 1 core, TSDB compaction plus a wide range query saturates it
+for seconds — dashboards get sluggish, nothing dies).
 
 *`lansoulot` tenancy **一台 A1 都沒有**,所以整份 Always Free Ampere 配額
-(**4 OCPU / 24 GB**)可用。在 `lansoulot/` 跑 `terraform apply` 就能建一台;把
-`shape_ocpus`/`shape_memory_gbs` 提到 **2 / 12** 不花錢,並消掉單核風險(單核上
-TSDB compaction 疊一條寬範圍查詢會被吃滿數秒 —— dashboard 卡頓,但不會掛)。*
+(**2 OCPU / 12 GB**,見上方更正)可用。在 `lansoulot/` 跑 `terraform apply` 就能建
+一台;把 `shape_ocpus`/`shape_memory_gbs` 提到 **2 / 12** 不花錢,並消掉單核風險
+(單核上 TSDB compaction 疊一條寬範圍查詢會被吃滿數秒 —— dashboard 卡頓,但不會掛)。*
 
 Three things to expect / 三個要預期的事:
 
@@ -364,6 +382,310 @@ switching backend later is a change to one `remote_write` block.
 *最省的決策路徑:**先把 Grafana Cloud 版上線,從它讀出真實的 active series 數,再
 決定。** 這樣就把整個決策所依賴的那一個數字從估算變成實測,而且不花成本 —— 之後換後
 端只是改一個 `remote_write` 區塊。*
+
+---
+
+## 3. The two free Frankfurt micros — measured 2026-08-02
+
+*Frankfurt 那兩顆免費 micro —— 2026-08-02 實測*
+
+§2 compared exactly two homes for the backend: Grafana Cloud, and a box in the
+**second tenancy** (`lansoulot`, us-sanjose-1). It missed a third machine that is
+already paid for. This section records it, and — importantly — concludes that it
+**does not** settle §2. It answers a different question that §2 never asked.
+
+*§2 只比較了兩個去處:Grafana Cloud,以及**第二個 tenancy**(`lansoulot`,
+us-sanjose-1)的機器。它漏掉了第三台早就付過錢的機器。本節記錄它,而且 —— 重點是 ——
+結論是它**解決不了** §2,它回答的是 §2 從未問過的另一個問題。*
+
+### 3.1 What is available / 有什麼可用
+
+Verified with `oci --profile louis4oci`, in **louis2's own tenancy** — not the
+second account:
+
+*用 `oci --profile louis4oci` 在 **louis2 自己的 tenancy** 查證,不是第二個帳號:*
+
+| Fact | Value |
+|---|---|
+| `standard-e2-micro-core-count` | **2 in `hJzo:EU-FRANKFURT-1-AD-1`**, 0 in AD-2 and AD-3 |
+| E2 instances currently running | **none — both free cores are unused** |
+| Shape if launched | `VM.Standard.E2.1.Micro` — 1 OCPU / **1.0 GB**, x86_64 (AMD), 0.48 Gbps |
+| Compute cost | **$0 — Always Free, and a _separate_ allowance from the A1 bucket** |
+| Idle reclamation | **does not apply** — that only reclaims Always Free instances in free-tier-only tenancies; this one is PAYG |
+| Placement vs louis2 | micros in **AD-1**, louis2 in **AD-3**, same region, same VCN reachable on private IP |
+
+Two consequences worth stating explicitly. First, **this does not touch the A1
+free bucket** — the 1,500 OCPU-hours that louis2 alone already consumes at ~99%
+are untouched by an E2 micro, so nothing here interacts with the scale-out cost
+arithmetic in `docs/scale-out-topology.html`. Second, **AD-1 vs AD-3 is a
+feature, not a wrinkle**: a watchdog in a different availability domain from the
+thing it watches is a better watchdog, and intra-region VCN traffic is not
+metered.
+
+*兩個要明講的推論。第一,**這不動用 A1 免費額度** —— louis2 一台就已經吃掉約 99% 的
+1,500 OCPU-hr,E2 micro 完全不碰它,所以本節與 `docs/scale-out-topology.html` 裡的擴充
+成本算式互不相干。第二,**AD-1 對 AD-3 是優點不是麻煩**:監控者跟被監控者在不同
+availability domain 才是好的監控,而且同 region 的 VCN 流量不計費。*
+
+### 3.2 The architecture wall — it can only run what you do not build
+
+*架構這道牆 —— 它只能跑「你不用自己 build 的東西」*
+
+The micro is **x86_64**; louis2 is **arm64**. The whole deploy pipeline builds
+with `podman build` on louis2 and imports into containerd, so **every image this
+platform produces is arm64 and cannot run on the micro.** Conversely, third-party
+software pulled from docker.io as a multi-arch image has no problem at all.
+
+*micro 是 **x86_64**,louis2 是 **arm64**。整條部署管線都在 louis2 上 `podman build`
+再匯入 containerd,所以**這個平台產出的每一個 image 都是 arm64,在 micro 上一個都跑不
+起來**。反過來說,從 docker.io 拉的第三方多架構 image 完全沒問題。*
+
+That single fact is the filter: **the micro is only ever a host for upstream
+software.** Note this is *not* the constraint §2.2 hit — that one was purely RAM,
+because Prometheus/Grafana/VictoriaMetrics all ship amd64 builds. Here both walls
+apply at once.
+
+*這一條就是篩子:**micro 永遠只能當上游軟體的宿主**。注意這**不是** §2.2 撞到的那道
+牆 —— 那道純粹是 RAM,因為 Prometheus/Grafana/VictoriaMetrics 都有 amd64 build。這裡
+是兩道牆同時成立。*
+
+### 3.3 It is not a metrics backend — §2.2's arithmetic applies verbatim
+
+*它不是指標後端 —— §2.2 的算式原封不動適用*
+
+1.0 GB here is the same 1.0 GB as `lh-i1`. §2.2's conclusion stands unchanged:
+Prometheus + Grafana is 1.2–1.5 GB and does not fit; `vmsingle` lands at
+600–800 MB, which is inside 1 GB with **zero headroom**, where one wide `rate()`
+range query risks the OOM killer. **§2 is not resolved by this section.**
+
+*這裡的 1.0 GB 跟 `lh-i1` 的 1.0 GB 是同一回事。§2.2 的結論完全不變:
+Prometheus + Grafana 是 1.2–1.5 GB,塞不下;`vmsingle` 約 600–800 MB,技術上進得去
+1 GB 但**零餘裕**,一條寬範圍 `rate()` 就可能引爆 OOM。**§2 不會被本節解決。***
+
+What *does* fit is a workload two orders of magnitude smaller. The fleet's
+estimated **8–15k active series** is what breaks 1 GB; blackbox-probing six
+public endpoints at 60s produces roughly **90 series**. Different problem, and
+therefore a different answer.
+
+*塞得下的是小兩個數量級的工作負載。壓垮 1 GB 的是機隊估算的 **8–15k active
+series**;用 blackbox 以 60 秒探測六個公開端點大約產生 **90 條 series**。不同的問題,
+所以有不同的答案。*
+
+| Component (all upstream amd64 images) | RSS |
+|---|---|
+| Oracle Linux 9 + `oracle-cloud-agent` | 300–400 MB |
+| `blackbox_exporter` | 15–25 MB |
+| `alertmanager` | 30–50 MB |
+| `vmsingle` — probe series only, 7 d retention | 80–120 MB |
+| **Total** | **~450–600 MB** |
+
+That leaves 400+ MB of headroom on a 1 GB box, and a 2 GB swapfile on the
+already-paid boot volume covers the tail. Add Grafana (150–250 MB) and the
+headroom is gone — **use VMUI instead**, which is built into `vmsingle`, speaks
+PromQL, and costs nothing extra.
+
+*在 1 GB 的機器上還剩 400+ MB 餘裕,再於已經付過錢的開機碟上開 2 GB swapfile 就能吸收
+尾巴。加上 Grafana(150–250 MB)餘裕就沒了 —— **改用 VMUI**,它內建於 `vmsingle`、
+會講 PromQL、不額外花錢。*
+
+### 3.4 Role A — off-node backup target. Unconditional, and overdue.
+
+*角色 A —— 異機備份落地點。無條件該做,而且早該做了。*
+
+**Measured 2026-08-02: this fleet has no Postgres backup of any kind.**
+`systemctl list-timers` on louis2 lists only `prune-images.timer` plus OS timers;
+there is no user crontab; and the only backup anywhere in the repo is the
+**one-off, manual** OCI boot-volume backup in `docs/runbook-storage.md` — a
+document which itself states that restoring it is *the only recovery path there
+is*.
+
+***2026-08-02 實測:這個機隊沒有任何形式的 Postgres 備份。** louis2 上
+`systemctl list-timers` 只有 `prune-images.timer` 與 OS 自帶的 timer;沒有 user
+crontab;整個 repo 裡唯一的備份是 `docs/runbook-storage.md` 裡那次**一次性、手動**的
+OCI 開機卷備份 —— 而那份文件自己就寫著,還原它是**僅有的復原路徑**。*
+
+The data this protects is small enough that the cost argument disappears
+entirely. Live sizes, same measurement:
+
+*它要保護的資料小到成本論點完全消失。同一次實測的實際大小:*
+
+| Database | Size |
+|---|---|
+| `gelp` | 18 MB |
+| `transigen` | 8.6 MB |
+| `snoopy_home` | 7.9 MB |
+| `postgres` | 7.5 MB |
+| **Total** | **~42 MB** |
+
+A compressed `pg_dumpall` of that is single-digit MB. The micro's 47 GB boot
+volume holds **years** of daily dumps without ever approaching full, and the PVC
+it is protecting is a 1Gi `local-path` volume — i.e. a directory on louis2's own
+disk, with no replication of any kind behind it.
+
+*壓縮後的 `pg_dumpall` 是個位數 MB。micro 那顆 47 GB 開機碟可以放**好幾年**的每日
+dump 都還離滿很遠;而它保護的 PVC 是 1Gi 的 `local-path` 卷 —— 也就是 louis2 自己磁碟
+上的一個目錄,背後沒有任何複本。*
+
+**Direction: push from louis2, exactly as §2.4 requires.** louis2 runs the dump
+and ships it out; the micro never reaches into louis2. Two design points that are
+easy to get backwards:
+
+***方向:從 louis2 推出去,與 §2.4 的規則一致。** louis2 自己做 dump 再送出去,micro
+永遠不主動連進 louis2。兩個很容易做反的設計點:*
+
+- **Never let the backup box hold a key into prod.** A pull design gives a
+  compromised backup host a shell on louis2. Push inverts that: the micro's
+  security list admits 22/tcp **from louis2's private IP only**, and the
+  `authorized_keys` entry is a forced command (`restrict,command="…"`), not a
+  general login.
+  ***絕不讓備份機持有進入 prod 的金鑰。** pull 設計等於讓被攻陷的備份主機拿到
+  louis2 的 shell。push 把方向反過來:micro 的 security list **只放行 louis2 私有 IP**
+  的 22/tcp,而 `authorized_keys` 用 forced command(`restrict,command="…"`),不是一般
+  登入。*
+- **Append-only, or it is not a backup.** If louis2 can delete what it wrote, one
+  compromise takes the history with it. `restic`/`borg` in append-only mode is
+  the standard answer; a plain `scp` into a writable directory is not.
+  ***要 append-only,否則那不算備份。** 如果 louis2 能刪掉自己寫過的東西,一次入侵就
+  連歷史一起帶走。`restic`/`borg` 的 append-only 模式是標準答案;`scp` 進一個可寫目錄
+  不是。*
+
+This role is **independent of the §2 decision** — it is worth doing whether the
+metrics backend ends up on Grafana Cloud, in San Jose, or nowhere.
+
+*這個角色**與 §2 的決策無關** —— 不論指標後端最後落在 Grafana Cloud、San Jose 還是
+哪裡都不去,它都值得做。*
+
+### 3.5 Role B — external watchdog. Conditional on §2.
+
+*角色 B —— 外部看門狗。取決於 §2。*
+
+A blackbox prober tests something no in-cluster collector can: **DNS → Cloudflare
+→ Traefik → certificate → app, end to end, from outside the failure domain.**
+Whether that is worth building depends entirely on how §2 resolves:
+
+*blackbox 探測驗證的是叢集內採集器做不到的事:**DNS → Cloudflare → Traefik → 憑證 →
+app,端到端,而且是從故障域外面看**。值不值得做完全取決於 §2 怎麼收:*
+
+- **If Grafana Cloud wins §2 — largely redundant, do not build it.** The free
+  tier includes Synthetic Monitoring and alerting, and an `absent()`/staleness
+  alert on `remote_write` already detects "louis2 stopped talking". The micro's
+  marginal contribution is a second opinion, which is not worth a second box to
+  operate.
+  ***如果 §2 收在 Grafana Cloud —— 大致重複,不要做。** 免費層已含 Synthetic
+  Monitoring 與告警,而且對 `remote_write` 設 `absent()`/staleness 告警本來就能偵測
+  「louis2 不說話了」。micro 只多提供一份第二意見,不值得多養一台機器。*
+- **If self-hosting wins §2 — build it, because it answers §2.5's own objection.**
+  §2.5 records the honest downside of self-hosting as "**nothing monitors the
+  monitor**". This is what monitors the monitor, and it sits in a third failure
+  domain: a different AD from louis2, and a different region from a San Jose
+  backend.
+  ***如果 §2 收在自架 —— 要做,因為它正好回答了 §2.5 自己提出的反對意見。** §2.5 誠實
+  地把自架的缺點記為「**沒有人監控監控者**」。這台就是監控監控者的東西,而且落在第三個
+  故障域:與 louis2 不同 AD,與 San Jose 的後端不同 region。*
+
+Either way, **Alertmanager belongs here rather than on louis2**, for the same
+reason: an alert path that dies with the thing it reports on is not an alert
+path.
+
+*無論哪一種,**Alertmanager 都該放這裡而不是 louis2**,理由相同:跟被通報對象一起死掉
+的通報路徑,不算通報路徑。*
+
+### 3.6 What it must not become / 不能拿它做什麼
+
+- **Not a k3s agent.** kubelet + containerd + flannel is ~300 MB — a third of the
+  box — bought in exchange for schedulability it has no use for. It should run
+  **podman + Quadlet**, which is the same conclusion the counterpoint section of
+  `docs/scale-out-topology.html` reaches for single-node workloads.
+  ***不要加進 k3s 當 agent。** kubelet + containerd + flannel 約 300 MB,佔掉整台的
+  三分之一,換到的只有它根本用不到的「可被排程」。它應該跑 **podman + Quadlet** ——
+  這跟 `docs/scale-out-topology.html` 那節 counterpoint 對單節點負載的結論一致。*
+- **Not Postgres, primary or replica.** `PGDATA` is architecture-specific, so
+  this is a `pg_dump`/restore, not a file copy; 1 GB is below what the current
+  instance is already tuned for; and every app query becomes a cross-node network
+  hop instead of in-cluster.
+  ***不要放 Postgres,主庫或副本都不行。** `PGDATA` 與架構相關,所以那是
+  `pg_dump`/還原而不是搬檔;1 GB 低於現有實例已經調好的用量;而且每一筆查詢都會從叢集
+  內變成跨機網路往返。*
+- **Not the `:9000` webhook listener.** Its entire job is to run `podman build`
+  and `kubectl rollout` **on louis2**. Moving it adds an SSH hop and a key for
+  zero benefit.
+  ***不要搬 `:9000` webhook。** 它的工作就是在 **louis2 上**跑 `podman build` 與
+  `kubectl rollout`。搬走只是多一跳 SSH 加一把金鑰,毫無好處。*
+- **Not any of the four apps.** Their images are arm64; and `next build` needs
+  ~2 GB, so the micro could not even build a replacement.
+  ***四個 app 一個都不要搬。** image 是 arm64;而 `next build` 需要約 2 GB,micro 連
+  重建一份都建不動。*
+
+### 3.7 Cost — compute $0, disk $1.20–2.00/month
+
+*成本 —— compute $0,磁碟每月 $1.20–2.00*
+
+Compute is free and does not consume the A1 bucket (§3.1). **The disk is not
+free**, and no amount of stopping the instance changes that — block storage bills
+whether the instance runs or not.
+
+*compute 免費且不吃 A1 額度(§3.1)。**磁碟不免費**,而且停機完全無濟於事 —— block
+storage 不管開機關機都照算。*
+
+47 GB is the floor: the OL9 image is 46.6 GB, measured identically on
+`capacity-probe-20260801` and on `lh-i1`. The Always Free 200 GB is **fully
+consumed by louis2's own 200 GB boot volume**, so a new volume bills from the
+first byte — confirmed live on 2026-08-02 by the probe's own invoice lines
+(`Block Volume - Storage` + `Block Volume - Performance Units`, ≈ $0.043/day for
+47 GB at VPU 10).
+
+*47 GB 是地板:OL9 image 本身 46.6 GB,在 `capacity-probe-20260801` 與 `lh-i1` 上量到
+的數字相同。Always Free 的 200 GB **已被 louis2 自己的 200 GB 開機碟吃滿**,所以新碟從
+第一個 byte 就全額計費 —— 2026-08-02 由探針自己的帳單行實證(`Block Volume - Storage`
+加 `Block Volume - Performance Units`,47 GB VPU 10 約 $0.043/日)。*
+
+| VPU tier | $/GB-month | 47 GB |
+|---|---|---|
+| 10 — Balanced (the default) | $0.0425 | **$2.00** |
+| 0 — Lower Cost | $0.0255 | **$1.20** |
+
+**Choose VPU 0.** Its 2 IOPS/GB baseline is ample for ~90 probe series and a
+nightly single-digit-MB dump. It would be the wrong choice for a database or an
+etcd member; it is the right one here, and it saves $9.60/year.
+
+***選 VPU 0。** 它每 GB 2 IOPS 的基準對約 90 條 probe series 與每晚個位數 MB 的 dump
+綽綽有餘。資料庫或 etcd 成員選它是錯的,這裡選它是對的,一年省 $9.60。*
+
+**Footnote on the stranded allowance / 關於被鎖住的那份額度。** louis2 uses
+**19 GB of its 200 GB** boot volume (measured: `/` 12 GB of 30 GB,
+`/var/lib/rancher` 6.6 GB of 80 GB, and ~90 GB never partitioned at all).
+Rebuilding louis2 on a 100 GB volume would return 100 GB of free allowance and
+make the micro's disk cost $0. That is a full node migration to save $1.20/month,
+so it is **not a recommendation** — it is recorded so that *if* louis2 is ever
+rebuilt for some other reason, the smaller boot volume is not forgotten.
+
+*louis2 的 200 GB 開機碟只用了 **19 GB**(實測:`/` 是 30 GB 用 12 GB、
+`/var/lib/rancher` 是 80 GB 用 6.6 GB,另有約 90 GB 從未建立分割區)。把 louis2 重建成
+100 GB 開機碟可以還回 100 GB 免費額度,micro 的碟就變成 $0。那是為了每月 $1.20 做一次
+完整節點遷移,所以**不是建議** —— 記在這裡只是為了:萬一 louis2 哪天因為別的理由重建,
+別忘了順手把開機碟改小。*
+
+### 3.8 Recommendation / 建議
+
+**Do Role A now; defer Role B until §2 is decided.** Role A closes a gap that
+exists today (no backup at all), costs $1.20/month, has no dependency on any open
+question, and needs one E2 micro. Role B is cheap to add to the same box later —
+it is two more containers — and should wait for §2 precisely because its value is
+the inverse of Grafana Cloud's.
+
+***先做角色 A;角色 B 等 §2 決定後再說。** 角色 A 補的是今天就存在的缺口(完全沒有備
+份),每月 $1.20,不相依於任何未決問題,只需要一顆 E2 micro。角色 B 之後往同一台機器上
+加很便宜 —— 就是多兩個 container —— 而且它該等 §2,正因為它的價值與 Grafana Cloud 的
+價值恰好互為反面。*
+
+The second free micro core stays unused for now. Its plausible future use is a
+bastion so louis2's `22/tcp` can be closed to the internet (Phase C), but that
+costs another $1.20/month and adds a failure mode on the operator's own access
+path — decide it with Phase C, not here.
+
+*第二顆免費 micro 核心暫時不用。它可能的未來用途是當 bastion,讓 louis2 的 `22/tcp`
+可以對網際網路關閉(Phase C),但那要再花每月 $1.20,而且在操作者自己的存取路徑上多一
+個故障點 —— 那個跟 Phase C 一起決定,不在這裡決定。*
 
 ---
 
