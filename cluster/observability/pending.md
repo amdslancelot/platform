@@ -2,15 +2,18 @@
 
 *可觀測性 —— 待修項與未定決策*
 
-Recorded 2026-07-29, extended 2026-08-02. Three independent things live here:
-**§1 must be fixed before this stack is applied to the node at all**, **§2 is a
-design choice that can stay open** — the stack works without deciding it — and
-**§3 is a machine nobody had counted**, which turns out to answer a different
-question than §2 was asking.
+Recorded 2026-07-29, extended 2026-08-02. Four independent things live here:
+**§1 had to be fixed before this stack could be applied at all** (done), **§2 is a
+design choice that can stay open** — the stack works without deciding it — **§3 is
+a machine nobody had counted**, which turns out to answer a different question
+than §2 was asking, and **§4 is what breaks if any of this ever runs somewhere
+other than louis2** (one bug found and fixed, one landmine handed to Phase B/C).
 
-*記錄於 2026-07-29,2026-08-02 增補。這裡有三件互不相干的事:**§1 是這個 stack 上節點
-之前必須先修的**,**§2 是可以先擱著的設計選擇**(不決定它 stack 也能上),而 **§3 是一
-台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題。*
+*記錄於 2026-07-29,2026-08-02 增補。這裡有四件互不相干的事:**§1 是 stack 上節點之前
+必須先修的**(已完成),**§2 是可以先擱著的設計選擇**(不決定它 stack 也能上),
+**§3 是一台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題,而 **§4 是「這些
+東西如果跑在 louis2 以外的地方會壞掉什麼」**(找出並修掉一個 bug,另交還一個地雷給
+Phase B/C)。*
 
 Branch state: `observability-stack`, rebased onto `main` (`f704340`) on
 2026-08-02, **§1 resolved**, still not pushed and still not applied to the node.
@@ -710,6 +713,164 @@ path — decide it with Phase C, not here.
 *第二顆免費 micro 核心暫時不用。它可能的未來用途是當 bastion,讓 louis2 的 `22/tcp`
 可以對網際網路關閉(Phase C),但那要再花每月 $1.20,而且在操作者自己的存取路徑上多一
 個故障點 —— 那個跟 Phase C 一起決定,不在這裡決定。*
+
+---
+
+## 4. Portability — what happens if this moves to another instance
+
+*可移植性 —— 如果這些東西搬到另一台 instance 會怎樣*
+
+Asked 2026-08-02: *could the observability pods/containers end up on a different
+OCI instance?* Answering it surfaced one real bug (4.2) and one landmine that
+belongs to Phase B rather than to this stack (4.4). Both are recorded here.
+
+*2026-08-02 提出的問題:observability 的 pod/container 有沒有可能跑到另一台 OCI
+instance 上?回答這個問題翻出了一個真的 bug(4.2),以及一個屬於 Phase B 而非本
+stack 的地雷(4.4)。兩個都記在這裡。*
+
+### 4.1 Two different questions, one word / 同一個詞,兩個問題
+
+"Moving to another instance" means two incompatible things, and the answers are
+opposite:
+
+*「搬到另一台 instance」有兩種互不相容的意思,答案完全相反:*
+
+| | **A. Another node in THIS k3s cluster** | **B. A separate instance / cluster** |
+|---|---|---|
+| How | new node runs `k3s agent`, joins louis2 | own k3s (or none), own tenancy/region |
+| Scheduler moves pods there | **yes, automatically** | never — different cluster |
+| What this section is mostly about | 4.2, 4.3, 4.4 | 4.5 |
+
+*A 是「加一個節點進**同一個** k3s 叢集」,排程器會自動把 pod 放過去;B 是「另一個獨立
+的 instance/叢集」,兩邊的排程器互不相干,pod 不會「移動」過去,只會是「再裝一份」。*
+
+### 4.2 The bug scenario A would have caused / 情境 A 原本會造成的 bug
+
+**Alloy was a DaemonSet. It must not be.** Every scrape in `alloy.yaml` gets its
+targets from the API server — `discovery.kubernetes "nodes"` returns *all* nodes,
+`discovery.kubernetes "pods"` returns *all* pods. One Alloy per node therefore
+means each node's Alloy scrapes **every** node's kubelet/cAdvisor/node-exporter,
+the single postgres-exporter, and every annotated app pod.
+
+*原本 Alloy 是 DaemonSet,**不該是**。`alloy.yaml` 裡每個 scrape 的目標都是向 API
+server 查詢得來的**全叢集**清單,所以每個節點一份 Alloy,就等於每一份都去抓「所有」節
+點與「所有」pod。*
+
+On one node this is invisible. On two nodes every series is produced twice with
+identical labels: duplicate-sample rejections at `remote_write`, and a doubled
+active-series count against the 10k free-tier ceiling — i.e. the failure would
+show up as *"the free tier is suddenly not enough"*, which is exactly the number
+§2.6 says to trust when choosing the backend. It would have corrupted the
+measurement the whole backend decision rests on.
+
+*單節點時完全看不出來;兩個節點時,每條 series 會用相同標籤被送出兩次 ——
+`remote_write` 判為重複樣本,active series 直接翻倍撞上 10k 免費上限。也就是說,故障
+會表現為「免費層突然不夠用」,而那正是 §2.6 說要拿來決定 backend 的那個數字。等於會污
+染整個 backend 決策所依賴的量測。*
+
+**Fixed 2026-08-02** — Alloy is now a `Deployment` with `replicas: 1` and
+`strategy: Recreate`. It holds no host state, so one cluster-wide collector is
+both correct and freely reschedulable onto any node.
+
+***2026-08-02 已修正** —— Alloy 改為 `replicas: 1` 的 `Deployment`,`strategy:
+Recreate`。它不持有任何 host 狀態,所以單一採集器既正確,也可以自由被排到任何節點。*
+
+node-exporter stays a DaemonSet, correctly: it reads the `/proc` of the node it
+runs on, so it must be **on** every node and cannot be a singleton. That is the
+dividing line — *does this workload read the machine it sits on?*
+
+*node-exporter 維持 DaemonSet 是對的:它讀的是自己所在節點的 `/proc`,必須**在**每個
+節點上,不能是單例。這就是分界線 —— **這個 workload 讀不讀它所在的那台機器?***
+
+### 4.3 What is already portable / 已經可移植的部分
+
+- **No PersistentVolumeClaims anywhere in this stack.** The TSDB lives in Grafana
+  Cloud; Alloy's WAL is an `emptyDir` holding only unsent samples. Rescheduling
+  costs at most that buffer — there is no volume to migrate and no local-path PVC
+  pinning a pod to a node.
+- **postgres-exporter reaches Postgres by Service DNS**
+  (`postgres.data.svc.cluster.local`), not by node IP, and the policy that admits
+  it (§1.1) is a `namespaceSelector`, not an `ipBlock`. Pod identity, not
+  location — so it works from any node without edits.
+- **Grafana Cloud is reached by outbound HTTPS only.** No inbound port, no DNS
+  record, no certificate. This is the same push-not-pull property §2.4 argued
+  for, and it is what makes any of this movable at all.
+
+*本 stack 沒有任何 PVC(TSDB 在 Grafana Cloud,Alloy 的 WAL 是只存未送出樣本的
+`emptyDir`),所以沒有卷要搬、也沒有 local-path PVC 把 pod 釘在某個節點上;
+postgres-exporter 走 Service DNS 而非節點 IP,放行它的政策用的是
+`namespaceSelector` 而非 `ipBlock` —— 認的是身分不是位置,換節點免修改;Grafana
+Cloud 只靠對外 HTTPS 連線,不需要任何對內埠、DNS 記錄或憑證。*
+
+### 4.4 What is NOT portable — and one of them is not ours
+
+*不可移植的部分 —— 其中一項不屬於本 stack*
+
+**(a) The host systemd timer.** `scripts/install-metrics-timer.sh` installs to
+`/usr/local/sbin` on **one** machine and writes `.prom` files into that machine's
+`/var/lib/node_exporter/textfile_collector`. A second node would run
+node-exporter (DaemonSet) but have an empty textfile directory — so
+`image_store_disk_bytes` and `pod_log_total_bytes` would exist for louis2 and
+silently not exist for the new node. Runbook Step 4 must be re-run **per node**.
+Its paths also assume k3s + a podman build store, which only holds for nodes that
+actually build images.
+
+*host 的 systemd timer 只裝在**一台**機器上。第二個節點會有 node-exporter(DaemonSet)
+但 textfile 目錄是空的 —— 那兩個自訂指標對 louis2 存在、對新節點靜默地不存在。Step 4
+必須**每個節點各跑一次**;而且它的路徑假設該節點有 k3s 與 podman build store,只有真
+的在上面 build image 的節點才成立。*
+
+**(b) The `ipBlock` rules in `cluster/networkpolicies/*.yaml` — Phase B's, not
+ours.** Four policies hardcode `10.0.0.240/32` (louis2's node IP) and three also
+hardcode `10.42.0.1/32` (node 0's cni0 gateway). A second node has a different
+node IP and its own pod-CIDR gateway (`10.42.1.1`), so **kubelet probes issued
+from that node to pods scheduled on it would be dropped**: readiness never turns
+true, the rollout never completes, and the app looks broken for a reason that has
+nothing to do with the app. This is pre-existing and lands the moment a node is
+added — flagged here because scenario A is what exposes it, but the fix belongs
+with the Phase B/C work, not with observability.
+
+*四個政策寫死了 `10.0.0.240/32`(louis2 的節點 IP),其中三個還寫死了 `10.42.0.1/32`
+(節點 0 的 cni0 閘道)。第二個節點的節點 IP 不同、pod CIDR 閘道也是自己的
+(`10.42.1.1`),所以**由該節點發出、打向其上 pod 的 kubelet 探針會被丟掉**:readiness
+永遠不會成立、rollout 永遠不會完成,而 app 看起來壞掉的原因跟 app 本身無關。這是既有
+問題,只要加節點就會發生 —— 記在這裡是因為情境 A 會把它翻出來,但修它屬於 Phase B/C,
+不屬於 observability。*
+
+### 4.5 Scenario B — a separate instance / 獨立的另一台
+
+Collectors cannot leave what they measure. node-exporter must sit on the node
+whose `/proc` it reads; cAdvisor/kubelet series come from that node's kubelet;
+postgres-exporter must reach Postgres on 5432. So for a genuinely separate
+instance there is nothing to "move" — you install a **second copy** of the same
+manifests in that cluster, pointing at the same Grafana Cloud stack.
+
+*採集器不能離開它所量測的對象:node-exporter 必須在它要讀 `/proc` 的那台節點上、
+cAdvisor/kubelet 的資料來自該節點的 kubelet、postgres-exporter 必須連得到 5432 的
+Postgres。所以對一台真正獨立的機器而言,沒有東西可以「搬」—— 是在那個叢集裡**再裝一
+份**相同的 manifest,指向同一個 Grafana Cloud stack。*
+
+For that to work the two copies must be distinguishable, which is why
+`external_labels` was changed from a hardcoded `cluster = "louis2"` to
+`cluster = sys.env("CLUSTER_NAME")` (`CLUSTER_NAME: louis2-k3s` in the Deployment
+env). Without it, a second cluster's series would carry the same `cluster` label
+and merge into the first's — two machines' metrics averaged into one meaningless
+line. Change that one env value per cluster and nothing else.
+
+*要讓兩份共存,必須能區分它們 —— 這就是 `external_labels` 從寫死的
+`cluster = "louis2"` 改成 `cluster = sys.env("CLUSTER_NAME")`(Deployment env 裡設
+`CLUSTER_NAME: louis2-k3s`)的原因。否則第二個叢集的 series 會帶著相同的 `cluster`
+標籤,跟第一個混在一起 —— 兩台機器的指標被平均成一條沒有意義的線。每個叢集只要改那
+一個環境變數,其他都不動。*
+
+Note this is a **different question from §2**. §2 asks where the metrics *backend*
+lives; §4.5 asks where the *collectors* run. §2.4's conclusion (push, never pull)
+is what keeps them independent: the backend can move without any collector
+changing, because no collector is ever connected *to*.
+
+*注意這跟 §2 是**不同的問題**。§2 問的是指標**後端**放哪裡;§4.5 問的是**採集器**跑在
+哪裡。§2.4 的結論(只推不拉)正是讓兩者互相獨立的原因:後端可以搬家而採集器一行都不
+用改,因為從來沒有人「連進」採集器。*
 
 ---
 

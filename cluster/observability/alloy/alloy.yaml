@@ -30,8 +30,11 @@ data:
           password = sys.env("GRAFANA_CLOUD_PROM_PASSWORD")
         }
       }
-      // Tag every series with the node so multi-source panels line up.
-      external_labels = { cluster = "louis2", fleet = "lans-h-cc" }
+      // Identify the SOURCE CLUSTER, not the node — `node` is already attached
+      // per-target below. Injected from env so a second cluster (e.g. one stood
+      // up on the unused ARM allowance) sets its own value and its series do not
+      // silently merge with this one's in the same Grafana Cloud stack.
+      external_labels = { cluster = sys.env("CLUSTER_NAME"), fleet = "lans-h-cc" }
     }
 
     // -- Node discovery -----------------------------------------------------
@@ -159,15 +162,41 @@ data:
       forward_to = [prometheus.remote_write.grafanacloud.receiver]
     }
 ---
+---
+# A Deployment with ONE replica, NOT a DaemonSet — deliberately.
+#
+# Every scrape below discovers its targets from the API server: `discovery.
+# kubernetes "nodes"` returns ALL nodes, and `discovery.kubernetes "pods"`
+# returns ALL pods. A DaemonSet would therefore put a collector on every node
+# and EACH of them would scrape EVERY node's kubelet/cAdvisor/node-exporter,
+# plus the one postgres-exporter, plus every annotated app pod. On a single node
+# that is invisible; the moment a second node joins, every series is produced
+# twice with identical labels — duplicate-sample rejections at remote_write and
+# a doubled active-series count against the 10k free-tier ceiling.
+#
+# Alloy holds no host state (unlike node-exporter, which must be a DaemonSet
+# because it reads the /proc of the node it runs on), so a single cluster-wide
+# collector is both correct and freely reschedulable onto any node.
+#
+# 這裡刻意用「單一 replica 的 Deployment」而不是 DaemonSet:下面每個 scrape 的目標
+# 都是向 API server 查詢得來的**全叢集**清單。若用 DaemonSet,每個節點各跑一份採集
+# 器,而每一份都會去抓「所有」節點與「所有」pod —— 單節點時看不出來,第二個節點一
+# 加入,每條 series 就會用相同標籤被送出兩次(remote_write 判為重複樣本、active
+# series 也翻倍撞上 10k 免費上限)。Alloy 不持有任何 host 狀態(node-exporter 必須
+# 是 DaemonSet,因為它要讀自己所在節點的 /proc),所以單一採集器既正確、又可以自由
+# 被排程到任何節點上。
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: alloy
   namespace: observability
   labels: { app: alloy }
 spec:
+  replicas: 1
   selector:
     matchLabels: { app: alloy }
+  strategy:
+    type: Recreate            # 避免新舊兩份同時在抓 → 短暫重複樣本
   template:
     metadata:
       labels: { app: alloy }
@@ -186,6 +215,10 @@ spec:
             - --storage.path=/var/lib/alloy/data
             - --server.http.listen-addr=0.0.0.0:12345
           env:
+            # Source-cluster identity for external_labels. Change this (and only
+            # this) if a second cluster ever ships into the same Grafana stack.
+            - name: CLUSTER_NAME
+              value: louis2-k3s
             - name: GRAFANA_CLOUD_PROM_URL
               valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-url } }
             - name: GRAFANA_CLOUD_PROM_USER
@@ -203,5 +236,13 @@ spec:
       volumes:
         - name: config
           configMap: { name: alloy-config }
+        # emptyDir, not a PVC — on purpose. The WAL only buffers samples that
+        # have not reached Grafana Cloud yet; it is a few minutes of data, not a
+        # database. Keeping it ephemeral means this whole stack owns NO
+        # persistent volume, so rescheduling Alloy onto another node costs at
+        # most the unsent buffer and nothing has to be migrated.
+        # 用 emptyDir 而非 PVC:WAL 只暫存「尚未送達 Grafana Cloud」的樣本,是幾分鐘
+        # 的資料而不是資料庫。保持它是暫時性的,整個 stack 就不持有任何持久卷 ——
+        # 把 Alloy 排到別的節點,代價最多是那段還沒送出的緩衝,沒有東西需要搬遷。
         - name: data
           emptyDir: {}

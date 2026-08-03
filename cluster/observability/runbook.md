@@ -28,16 +28,60 @@ checkout(`~opc/platform`)執行。全程不碰 app 資料;每步可回退。照�
 
 ## Step 0 — Grafana Cloud free-tier account
 
-**Goal / 目標:** get the Prometheus remote_write endpoint + credentials that
-Alloy ships to, and prove they work **before** anything is deployed. Free tier:
-10k active series, 14-day retention, no credit card — enough for this fleet
-(estimated 8–15k series, see `pending.md` §2.2; measuring the real number is the
-whole reason to start here rather than self-hosting).
+**Goal / 目標:** end this step holding **three strings** — a URL, a username and
+a password — and having proved they work. That is all Step 0 produces. Steps 1–4
+then install software that uses them.
 
-*拿到 Alloy 要送達的 Prometheus remote_write endpoint 與憑證,並在部署任何東西**之前**
-先驗證它們可用。免費層:10k active series、14 天保留、免信用卡,對這個機隊夠用
-(估 8–15k series,見 `pending.md` §2.2;先跑雲端就是為了量到真實數字,再決定要不要
-自架)。*
+*這一步結束時,手上要有**三個字串** —— 一個網址、一個帳號、一個密碼 —— 而且已經確認
+它們可用。Step 0 的產出就只有這樣;Step 1–4 才是安裝會用到它們的軟體。*
+
+### Why those three strings exist / 為什麼是這三個字串
+
+Metrics need two halves: something that **collects** them, and something that
+**stores and draws** them.
+
+*監控需要兩半:一半**採集**,一半**儲存與繪圖**。*
+
+- The collecting half is **Alloy**, installed on `louis2` in Step 3. It reads
+  CPU/RAM/disk/DB numbers off the node and the cluster.
+- The storing half is normally Prometheus + Grafana, which would want ~1.5 GB of
+  RAM and a disk. `louis2` has 2 OCPU / 12 GB shared with k3s, Traefik, Postgres
+  and four apps — running the monitor there makes it compete with the very thing
+  it is supposed to watch. So this half is **rented from Grafana Cloud's free
+  tier** instead: 10k active series, 14-day retention, no credit card.
+
+*採集那半是 **Alloy**,Step 3 裝在 `louis2` 上,負責讀出節點與叢集的
+CPU/記憶體/磁碟/資料庫數字。儲存繪圖那半通常是 Prometheus + Grafana,大約要 1.5 GB
+記憶體加一顆磁碟;而 `louis2` 只有 2 OCPU / 12 GB,還要分給 k3s、Traefik、Postgres 和
+四個 app —— 把監控放上去,等於讓它跟被監控的對象搶資源。所以這半**改用 Grafana Cloud
+免費層**:10k active series、14 天保留、免信用卡。*
+
+Alloy sends its samples **out** to that rented half over HTTPS. To do that it
+needs to know *where to send* and *who it is*:
+
+*Alloy 透過 HTTPS 把樣本**往外送**到租來的那半。要送,它得知道**送去哪**、以及**它是
+誰**:*
+
+| The string | What it is | Where it comes from |
+|---|---|---|
+| `PROM_URL` | the address Alloy POSTs samples to, ending `/api/prom/push` | 0b |
+| `PROM_USER` | **a number**, not an email — Grafana Cloud's ID for your storage instance | 0b |
+| `PROM_PASSWORD` | a token starting `glc_…` that proves Alloy is allowed to write | 0c |
+
+*(`remote_write` is just Prometheus's name for "push samples to a URL over
+HTTP". There is no inbound connection and nothing on `louis2` gets exposed —
+which is also why this design survives the node being firewalled. 「remote_write」
+只是 Prometheus 對「用 HTTP 把樣本推到某個網址」的稱呼。全程沒有任何對內連線,
+`louis2` 不會因此開任何埠。)*
+
+Step 0e adds a fourth string that has nothing to do with Grafana —
+`POSTGRES_EXPORTER_PASSWORD`, a password you invent for a read-only database user
+that Steps 1 and 2 both need. It is generated here only so the two steps cannot
+disagree about it.
+
+*0e 另外產生第四個字串,跟 Grafana 無關:`POSTGRES_EXPORTER_PASSWORD` —— 一個你自己
+決定、給唯讀資料庫使用者用的密碼,Step 1 和 Step 2 都要用到。放在這裡產生,只是為了
+避免兩步各自填出不一樣的值。*
 
 ### 0a. Create the stack / 建立 stack
 
@@ -85,6 +129,15 @@ numeric.
 
 ### 0c. Mint a write-only token / 產生只能寫入的 token
 
+This is where `PROM_PASSWORD` comes from. Grafana Cloud splits it in two: an
+**access policy** is a named set of permissions, and a **token** is a key issued
+under that policy. You create the policy once, then generate a token from it —
+the token string is the password Alloy uses.
+
+*`PROM_PASSWORD` 是在這裡產生的。Grafana Cloud 把它拆成兩層:**access policy** 是一組
+具名的權限,**token** 是依據那組權限發出的鑰匙。先建立 policy,再從它產生 token ——
+token 那串字就是 Alloy 要用的密碼。*
+
 ```
 Portal → Access Policies → "Create access policy"
   Display name : louis2-alloy            ← 一台機器一個 policy,撤銷時不影響其他
@@ -117,9 +170,26 @@ my stack", not "someone can read my fleet's telemetry".
 
 ### 0d. Load them into the shell and verify / 帶進 shell 並驗證
 
-Run on the node (`louis2`), in the shell you will use for Steps 1–3.
+Run on the node (`louis2`), in the shell you will use for Steps 1–3. Two things
+happen here: the three strings become shell variables (Steps 2 and 3 read them
+from the environment), and one `curl` checks them **before** any software is
+installed — so a typo surfaces now, not as a silent no-data dashboard later.
 
-*在節點(`louis2`)上、你接下來要跑 Step 1–3 的那個 shell 執行。*
+*在節點(`louis2`)上、你接下來要跑 Step 1–3 的那個 shell 執行。這裡做兩件事:把三個
+字串變成 shell 變數(Step 2、3 會從環境變數讀取),以及用一個 `curl` 在**安裝任何軟體
+之前**先驗證它們 —— 打錯字現在就會現形,而不是等到之後看到一個沒有資料的儀表板才發現。*
+
+**The success code for that check is `400`, not `200`.** The endpoint only
+accepts a compressed binary payload, and we deliberately send an empty body: the
+server must first check the username/password (that is what we are testing) and
+only then complain about the body. So a `400` means *"your credentials were
+accepted, your payload was not"* — exactly what we want to see. A `200` is not
+obtainable here without sending real metrics.
+
+***這個檢查的成功碼是 `400`,不是 `200`。**該端點只收壓縮過的二進位內容,而我們刻意送
+一個空的 body:伺服器會先檢查帳號密碼(這正是我們要測的),之後才抱怨 body。所以
+`400` 的意思是**「憑證通過了,內容不合格」** —— 正是我們想看到的結果。這裡不送真實
+指標就不可能拿到 `200`。*
 
 ```bash
 set +o history                       # 這一段不要進 bash history;結束後再 set -o history
@@ -265,14 +335,25 @@ kubectl create secret generic grafana-cloud -n observability \
 kubectl apply -f cluster/observability/alloy/rbac.yaml   # SA + read-only ClusterRole
 kubectl apply -f cluster/observability/node-exporter.yaml   # host metrics + textfile collector
 kubectl apply -f cluster/observability/alloy/alloy.yaml  # collector + config
-kubectl -n observability rollout status ds/alloy
-kubectl -n observability rollout status ds/node-exporter
+kubectl -n observability rollout status deploy/alloy         # Deployment, 單一 replica
+kubectl -n observability rollout status ds/node-exporter     # DaemonSet, 每節點一份
 ```
 
-**Expect / 預期:** both DaemonSets Ready (1/1). Alloy logs show no scrape auth
-errors: `kubectl -n observability logs ds/alloy | grep -i error` → empty.
+**Expect / 預期:** `deploy/alloy` 1/1 and `ds/node-exporter` Ready on every node.
+Alloy logs show no scrape auth errors:
+`kubectl -n observability logs deploy/alloy | grep -i error` → empty.
 
-*預期:兩個 DaemonSet 皆 Ready(1/1);Alloy log 無 scrape 認證錯誤。*
+*預期:`deploy/alloy` 1/1、`ds/node-exporter` 在每個節點上 Ready;Alloy log 無 scrape
+認證錯誤。*
+
+The shapes differ on purpose: node-exporter must run **on** each node (it reads
+that node's `/proc`), while Alloy discovers all its targets through the API
+server, so exactly one is needed and it can sit on any node. See the comment at
+the top of the Deployment in `alloy/alloy.yaml`, and `pending.md` §4.
+
+*兩者形狀不同是刻意的:node-exporter 必須跑在**每個**節點上(它要讀該節點的
+`/proc`),而 Alloy 的目標全是透過 API server 查詢得來的,所以只需要一份、且放在哪個
+節點都可以。理由見 `alloy/alloy.yaml` 裡 Deployment 上方的註解與 `pending.md` §4。*
 
 ---
 

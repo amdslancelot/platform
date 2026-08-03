@@ -50,7 +50,7 @@ node-exporter.yaml             DaemonSet: host metrics + textfile collector
 postgres-exporter.yaml         Deployment + Service: per-app DB metrics
 provision-monitoring-role.sh   least-priv pg_monitor role for the exporter
 alloy/rbac.yaml                Alloy ServiceAccount + read-only ClusterRole
-alloy/alloy.yaml               Alloy DaemonSet + config (remote_write → Grafana Cloud)
+alloy/alloy.yaml               Alloy Deployment (1 replica) + config (remote_write → Grafana Cloud)
 scripts/image-metrics.sh       host: image count/size → textfile .prom
 scripts/log-size.sh            host: per-pod log dir size → textfile .prom
 scripts/observability-metrics.{service,timer}   systemd: run the two scripts every 5m
