@@ -6,7 +6,36 @@
 # NOTE: like `data` (created in data-postgres/postgres.yaml), this namespace is
 # created HERE rather than in cluster/namespaces.yaml — it is owned by the
 # observability stack, not by the app-plumbing list.
+#
+# Pod Security Admission — an EXPLICIT exemption, not an oversight:
+#   The five app/plumbing namespaces carry `warn`+`audit: restricted`
+#   (cluster/namespaces.yaml). This one carries `enforce: privileged` instead,
+#   because node-exporter needs `hostNetwork` + `hostPID` + a hostPath mount of
+#   `/` — a host-metrics exporter cannot read host metrics without host
+#   namespaces, and it is the ONE workload on this node for which that is true.
+#   `privileged` is what an unlabelled namespace already resolves to; stating it
+#   makes the exemption a decision on the record rather than a gap.
+#
+#   PSA —— 這是**明寫的豁免**,不是漏標:
+#   五個 app/plumbing namespace 標的是 `warn`+`audit: restricted`;這個標
+#   `enforce: privileged`,因為 node-exporter 需要 `hostNetwork` + `hostPID` 與
+#   掛載 `/` —— host 指標 exporter 沒有 host namespace 就讀不到 host 指標,而它是
+#   本節點唯一符合這個描述的 workload。沒有標籤的 namespace 本來就等於
+#   `privileged`;明寫出來,是把豁免變成有紀錄的決定,而不是一個缺口。
+#
+#   `warn`/`audit: restricted` is deliberately NOT set here: the DaemonSet would
+#   trip it on every single pod creation, and a warning that always fires is a
+#   warning nobody reads. Alloy and postgres-exporter do not need host access —
+#   if either ever grows a hostPath or a host namespace, that is a review
+#   trigger, not something to silence with a label.
+#   這裡刻意不標 `warn`/`audit: restricted`:那個 DaemonSet 每次建 pod 都會觸發,
+#   而永遠都在響的警告等於沒有警告。Alloy 與 postgres-exporter 不需要 host 存取 ——
+#   哪天它們長出 hostPath 或 host namespace,那是該 review 的訊號。
+#
+#   See docs/security-posture-audit-remediation-plan.md §1.4 and pending.md §1.3.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: observability
+  labels:
+    pod-security.kubernetes.io/enforce: privileged   # node-exporter 需要 host namespace,見上方註解

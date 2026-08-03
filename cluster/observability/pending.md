@@ -12,17 +12,17 @@ question than §2 was asking.
 之前必須先修的**,**§2 是可以先擱著的設計選擇**(不決定它 stack 也能上),而 **§3 是一
 台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題。*
 
-Branch state: `observability-stack`, 2 commits, based on `883e07f`, **13 commits
-behind `main`**, not pushed, not applied to the node.
+Branch state: `observability-stack`, rebased onto `main` (`f704340`) on
+2026-08-02, **§1 resolved**, still not pushed and still not applied to the node.
 
-*分支狀態:`observability-stack`,2 個 commit,基底 `883e07f`,**落後 `main` 13 個
-commit**,未 push,未套用到節點。*
+*分支狀態:`observability-stack`,2026-08-02 已 rebase 到 `main`(`f704340`),
+**§1 已處理完畢**,仍未 push、仍未套用到節點。*
 
 ---
 
-## 1. Pre-flight fixes — required before applying
+## 1. Pre-flight fixes — required before applying ✅ DONE 2026-08-02
 
-*套用前必修項*
+*套用前必修項 —— 已完成*
 
 All of these exist because this branch was authored **before** the Phase B-1..B-4
 security hardening landed on `main` (`a9d739e` NetworkPolicy, `f919ae6` postgres
@@ -31,6 +31,30 @@ limits). Rebase onto `main` first, then fix these.
 *這些問題全部來自:本分支的撰寫時間**早於** Phase B-1..B-4 的加固進 `main`
 (`a9d739e` NetworkPolicy、`f919ae6` postgres limits)。先 rebase 到 `main`,再修
 以下各項。*
+
+| # | Status | What was done |
+|---|---|---|
+| 1.1 | ✅ fixed | `cluster/networkpolicies/data.yaml` — added an `observability` namespaceSelector; runbook Step 2 now re-applies it before deploying the exporter |
+| 1.2 | ⏸ deferred **by design** | Not a pre-emptive fix. The policy line is documented in runbook Step 4b and applied **per app, when that app opts in** |
+| 1.3 | ✅ fixed | `namespace.yaml` — explicit `pod-security.kubernetes.io/enforce: privileged` + the reason, and why `warn/audit: restricted` is deliberately absent |
+| 1.4 | ✅ fixed | runbook closing section B rewritten to point at `main`'s existing **daily** prune timer; section A kept and marked STILL OPEN with the k3s-restart caveat |
+| 1.5 | ✅ fixed | runbook Step 5 disk query → `mountpoint=~"/\|/var/lib/rancher\|/var/lib/containers"` |
+
+The subsections below are kept verbatim as the reasoning record — read them for
+*why*, not for *what is left to do*. The only one still live is **1.2**, and it is
+live on purpose.
+
+*以下小節原文保留,作為推理紀錄 —— 讀它們是為了了解**為什麼**,不是為了找**還要做
+什麼**。唯一仍未處理的是 **1.2**,而那是刻意的。*
+
+One item escapes this branch entirely: **1.3's secondary note — node-exporter
+binds `0.0.0.0:9100` under `hostNetwork`. Phase C's host firewall must account for
+9100.** Not internet-reachable today (the OCI security list opens only 80/443/9000),
+so it does not block this stack, but it must not be forgotten when Phase C lands.
+
+*有一項超出本分支範圍:**1.3 的附帶事項 —— node-exporter 在 `hostNetwork` 下綁
+`0.0.0.0:9100`,Phase C 的 host firewall 必須把 9100 算進去。**今天對外不可達
+(OCI security list 只開 80/443/9000),所以不擋這個 stack,但 Phase C 時不能漏掉。*
 
 ### 1.1 `postgres-exporter` is blocked by the `data` NetworkPolicy
 

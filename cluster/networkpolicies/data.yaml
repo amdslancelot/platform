@@ -39,6 +39,11 @@ spec:
             matchLabels: { kubernetes.io/metadata.name: gelp }
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: transigen }
+        # postgres-exporter 在 observability namespace,以 pod IP 連 5432。
+        # 它用的是 pg_monitor role(見 cluster/observability/provision-monitoring-role.sh),
+        # 讀得到統計視圖、讀不到 app 資料 —— 放行的是「同一個埠、更小的權限」。
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
         # 節點本身:`kubectl port-forward` 是由節點對 pod 建立連線,留著才能做維運除錯。
         # 這不算放寬:任何能在節點上開 port-forward 的人,本來就能 `kubectl exec` 進去。
         - ipBlock: { cidr: 10.0.0.240/32 }
