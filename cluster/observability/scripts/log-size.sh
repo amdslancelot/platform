@@ -16,6 +16,10 @@ POD_LOG_DIR="/var/log/pods"
 mkdir -p "$OUT_DIR"
 tmp="$(mktemp "$OUT_DIR/.log_size.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
+# 0600 from mktemp would be unreadable by node-exporter, which runs as `nobody`.
+# See the same note in image-metrics.sh — the failure mode is a silently missing
+# metric, not an error.
+chmod 0644 "$tmp"
 
 {
   echo "# HELP pod_log_dir_size_bytes Size of a pod's on-host container-log directory."

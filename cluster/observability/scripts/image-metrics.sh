@@ -24,6 +24,12 @@ PODMAN_STORE="/var/lib/containers/storage"
 mkdir -p "$OUT_DIR"
 tmp="$(mktemp "$OUT_DIR/.image_metrics.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
+# mktemp creates 0600 and `mv` preserves it, so the finished .prom would be
+# root-only — and the node-exporter image runs as `nobody`, so it could not read
+# it. The failure is silent from the outside: the file exists, looks right, and
+# the metrics simply never appear. node_textfile_scrape_error goes to 1.
+# 這裡的內容不是機密(image 名稱與大小),0644 是對的。
+chmod 0644 "$tmp"
 
 imgs_json="$("$K3S" crictl images --output json 2>/dev/null || echo '{"images":[]}')"
 count="$(echo "$imgs_json" | jq '.images | length')"
