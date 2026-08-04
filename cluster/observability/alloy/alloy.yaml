@@ -217,8 +217,27 @@ spec:
           env:
             # Source-cluster identity for external_labels. Change this (and only
             # this) if a second cluster ever ships into the same Grafana stack.
+            #
+            # Named after the LOCATION, not the machine: this is a cluster label,
+            # and a cluster outlives any one node. `louis2-k3s` would have been
+            # the first member's name standing in for the whole — fine until a
+            # second node joins. `fra` = eu-frankfurt-1; a cluster in the other
+            # tenancy's us-sanjose-1 would be `sjc-k3s`, distinct without either
+            # name being tied to a VM.
+            #
+            # Changing this AFTER data exists splits the history: old samples keep
+            # `cluster="fra-k3s"`, new ones carry the new value, and queries stop
+            # joining across the rename. Decide it before Step 3, not after.
+            #
+            # 用「位置」而非「機器」命名:這是 cluster 標籤,而 cluster 的壽命長於任何
+            # 單一節點。`louis2-k3s` 是拿第一個成員的名字代稱整個叢集 —— 在第二個節點
+            # 加入前都還好。`fra` = eu-frankfurt-1;另一個 tenancy 的 us-sanjose-1 就會
+            # 是 `sjc-k3s`,兩者分得開,而且都不綁任何一台 VM。
+            #
+            # 有資料之後才改會把歷史切成兩段:舊樣本仍帶 `cluster="fra-k3s"`,新樣本帶
+            # 新值,查詢無法跨越改名接起來。要決定就在 Step 3 之前決定。
             - name: CLUSTER_NAME
-              value: louis2-k3s
+              value: fra-k3s
             - name: GRAFANA_CLOUD_PROM_URL
               valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-url } }
             - name: GRAFANA_CLOUD_PROM_USER

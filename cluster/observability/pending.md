@@ -854,16 +854,40 @@ Postgres。所以對一台真正獨立的機器而言,沒有東西可以「搬�
 
 For that to work the two copies must be distinguishable, which is why
 `external_labels` was changed from a hardcoded `cluster = "louis2"` to
-`cluster = sys.env("CLUSTER_NAME")` (`CLUSTER_NAME: louis2-k3s` in the Deployment
+`cluster = sys.env("CLUSTER_NAME")` (`CLUSTER_NAME: fra-k3s` in the Deployment
 env). Without it, a second cluster's series would carry the same `cluster` label
 and merge into the first's — two machines' metrics averaged into one meaningless
 line. Change that one env value per cluster and nothing else.
 
 *要讓兩份共存,必須能區分它們 —— 這就是 `external_labels` 從寫死的
 `cluster = "louis2"` 改成 `cluster = sys.env("CLUSTER_NAME")`(Deployment env 裡設
-`CLUSTER_NAME: louis2-k3s`)的原因。否則第二個叢集的 series 會帶著相同的 `cluster`
+`CLUSTER_NAME: fra-k3s`)的原因。否則第二個叢集的 series 會帶著相同的 `cluster`
 標籤,跟第一個混在一起 —— 兩台機器的指標被平均成一條沒有意義的線。每個叢集只要改那
 一個環境變數,其他都不動。*
+
+The value is a **location**, not a machine name: `fra` = `eu-frankfurt-1`. A
+cluster outlives any one node, so naming it after its first member (`louis2-k3s`)
+would read wrong the moment a second node joined — which is precisely scenario A,
+the one this stack is now built to survive. The `lansoulot` tenancy's
+`us-sanjose-1` would be `sjc-k3s`. The second axis, `fleet = "lans-h-cc"`, is the
+constant one and already carries ownership; `cluster` is the axis that varies, so
+it is the one that has to discriminate.
+
+*這個值是**位置**,不是機器名:`fra` = `eu-frankfurt-1`。cluster 的壽命長於任何單一
+節點,所以拿第一個成員命名(`louis2-k3s`)在第二個節點加入的那一刻就會讀起來不對 ——
+而那正是情境 A,這個 stack 現在就是為了撐過它才改的。`lansoulot` tenancy 的
+`us-sanjose-1` 會是 `sjc-k3s`。另一個軸 `fleet = "lans-h-cc"` 是恆定的、已經承載了歸屬,
+`cluster` 才是會變的那個軸,所以由它負責區分。*
+
+**This is the one value that is expensive to change later.** It is stamped onto
+every series; renaming after data exists splits the history in two and queries
+stop joining across the rename. Decided 2026-08-04, before Step 3 — the token and
+access-policy names, by contrast, are cosmetic and can be rotated at any time
+(mint a new policy, swap the Secret, delete the old one).
+
+***這是唯一「事後改很貴」的值。**它會被烙進每一條 series;有資料之後改名會把歷史切成
+兩段,查詢無法跨越改名接起來。2026-08-04 於 Step 3 之前定案 —— 相對地,token 與 access
+policy 的名稱只是外觀,隨時可以輪替(建新 policy、換掉 Secret、刪舊的)。*
 
 Note this is a **different question from §2**. §2 asks where the metrics *backend*
 lives; §4.5 asks where the *collectors* run. §2.4's conclusion (push, never pull)
