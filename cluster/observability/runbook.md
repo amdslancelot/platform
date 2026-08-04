@@ -168,6 +168,62 @@ my stack", not "someone can read my fleet's telemetry".
 
 *預期:password manager 裡存好一串 `glc_…` 開頭的 token。*
 
+#### Optional, and NOT needed by any step in this runbook — a second, read-only policy
+
+*選配,本 runbook 沒有任何一步會用到 —— 第二組唯讀 policy*
+
+Skip this unless you already know you want to **embed dashboards in
+`lans-h.cc`**. Grafana Cloud does not allow it: panel embedding and anonymous
+access are Grafana OSS / Enterprise features and are switched off on Cloud, even
+for externally-shared dashboards. The way to get an embeddable dashboard is to
+run **Grafana OSS on the cluster as a UI layer only**, with its datasource
+pointing back at Grafana Cloud's Prometheus — storage and query execution stay
+rented, only rendering comes home. That self-hosted Grafana needs to **read**,
+and the Alloy token above deliberately cannot.
+
+*除非你已經確定要**把 dashboard 嵌進 `lans-h.cc`**,否則跳過這一段。Grafana Cloud
+不允許 embed:panel embedding 和 anonymous access 是 Grafana OSS / Enterprise 的功能,
+在 Cloud 上是關掉的,連 externally-shared dashboard 也一樣。要拿到可嵌入的 dashboard,
+做法是在叢集上跑一份 **Grafana OSS 純粹當 UI 層**,datasource 指回 Grafana Cloud 的
+Prometheus —— 儲存和查詢執行仍然是租的,只有渲染搬回本地。那份自架 Grafana 需要
+**讀取**權限,而上面那個 Alloy token 是刻意讀不了的。*
+
+```
+Portal → Access Policies → "Create access policy"
+  Display name : lansh-grafana-read
+  Realm        : your stack
+  Scopes       : metrics:read            ← ONLY read. 不要在同一個 policy 裡混 write
+Then: "Add token" → name lansh-grafana-read-token → set an expiry.
+```
+
+**Two policies, not one policy with both scopes.** They live in different places
+and have different exposure: the write token sits on an internet-reachable node,
+the read token sits in a Grafana Deployment. Separating them means revoking
+either one does not take down the other, and a leak of the node's token still
+cannot read your telemetry — which is the whole point of §0c being write-only.
+
+***兩組獨立的 policy,不是一組 policy 勾兩個 scope。**它們放在不同地方、暴露面也不同:
+write token 在一台對外可達的節點上,read token 在一個 Grafana Deployment 裡。分開的意義
+是撤銷任一邊都不會弄掉另一邊,而且節點上的 token 就算外洩也仍然讀不到你的遙測資料 ——
+那正是 0c 只給 write 的用意。*
+
+The self-hosted-Grafana work itself is **not part of this runbook** and is not
+scheduled. See `pending.md` §5 for the decision, including the part that must be
+settled before anything is published: a public dashboard exposes namespace names
+(= app names), per-app database sizes, pod names and node headroom, which
+contradicts the redaction already applied to the public `topology.html`.
+
+*自架 Grafana 這件事**不屬於本 runbook**,也還沒排程。決策記在 `pending.md` §5,包含
+發布前必須先解決的部分:公開的 dashboard 會露出 namespace 名(等於 app 名)、每個 app
+的資料庫大小、pod 名稱與節點餘量,這跟公開版 `topology.html` 已經做的 redaction 互相
+牴觸。*
+
+**Expect / 預期:** nothing changes for Steps 1–5. If you did create it, a second
+`glc_…` token is in your password manager, clearly labelled *read*.
+
+*預期:Step 1–5 完全不受影響。若你確實建立了,password manager 裡會多一串 `glc_…`,
+標註清楚是 **read** 那一支。*
+
 ### 0d. Load them into the shell and verify / 帶進 shell 並驗證
 
 Run on the node (`louis2`), in the shell you will use for Steps 1–3. Two things

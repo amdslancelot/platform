@@ -2,18 +2,20 @@
 
 *可觀測性 —— 待修項與未定決策*
 
-Recorded 2026-07-29, extended 2026-08-02. Four independent things live here:
-**§1 had to be fixed before this stack could be applied at all** (done), **§2 is a
-design choice that can stay open** — the stack works without deciding it — **§3 is
-a machine nobody had counted**, which turns out to answer a different question
-than §2 was asking, and **§4 is what breaks if any of this ever runs somewhere
-other than louis2** (one bug found and fixed, one landmine handed to Phase B/C).
+Recorded 2026-07-29, extended 2026-08-02 and 2026-08-04. Five independent things
+live here: **§1 had to be fixed before this stack could be applied at all**
+(done), **§2 is a design choice that can stay open** — the stack works without
+deciding it — **§3 is a machine nobody had counted**, which turns out to answer a
+different question than §2 was asking, **§4 is what breaks if any of this ever
+runs somewhere other than louis2** (one bug found and fixed, one landmine handed
+to Phase B/C), and **§5 is a product limit that only bites if you want the
+dashboards on your own site**.
 
-*記錄於 2026-07-29,2026-08-02 增補。這裡有四件互不相干的事:**§1 是 stack 上節點之前
-必須先修的**(已完成),**§2 是可以先擱著的設計選擇**(不決定它 stack 也能上),
-**§3 是一台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題,而 **§4 是「這些
+*記錄於 2026-07-29,2026-08-02、2026-08-04 增補。這裡有五件互不相干的事:**§1 是 stack
+上節點之前必須先修的**(已完成),**§2 是可以先擱著的設計選擇**(不決定它 stack 也能
+上),**§3 是一台先前沒被算進來的機器** —— 結果它回答的是跟 §2 不同的問題,**§4 是「這些
 東西如果跑在 louis2 以外的地方會壞掉什麼」**(找出並修掉一個 bug,另交還一個地雷給
-Phase B/C)。*
+Phase B/C),而 **§5 是一個只有在你想把 dashboard 放到自己網站時才會踩到的產品限制**。*
 
 Branch state: `observability-stack`, rebased onto `main` (`f704340`) on
 2026-08-02, **§1 resolved**, still not pushed and still not applied to the node.
@@ -871,6 +873,134 @@ changing, because no collector is ever connected *to*.
 *注意這跟 §2 是**不同的問題**。§2 問的是指標**後端**放哪裡;§4.5 問的是**採集器**跑在
 哪裡。§2.4 的結論(只推不拉)正是讓兩者互相獨立的原因:後端可以搬家而採集器一行都不
 用改,因為從來沒有人「連進」採集器。*
+
+---
+
+## 5. Embedding dashboards in `lans-h.cc` — Grafana Cloud will not do it
+
+*把 dashboard 嵌進 `lans-h.cc` —— Grafana Cloud 做不到*
+
+Raised 2026-08-04. Nothing here blocks applying the stack; it only decides what
+happens *after* there are dashboards worth showing.
+
+*2026-08-04 提出。這一節不擋 stack 上線,它決定的是「有值得展示的 dashboard 之後」要
+怎麼做。*
+
+### 5.1 The limit, stated exactly / 限制的確切內容
+
+Grafana's own documentation: *"Panel embedding and anonymous access permissions
+are not available in Grafana Cloud, even for panels in externally shared
+dashboards."* Both are **Grafana OSS / Enterprise** features. So on the free tier
+there is no `<iframe>` route at all — not for a panel, not for a whole dashboard.
+
+*Grafana 官方文件:*"Panel embedding and anonymous access permissions are not
+available in Grafana Cloud, even for panels in externally shared dashboards."*
+兩者都是 **Grafana OSS / Enterprise** 的功能。所以免費層根本沒有 `<iframe>` 這條路 ——
+單一 panel 不行,整個 dashboard 也不行。*
+
+What Cloud *does* give:
+
+*Cloud 確實有的:*
+
+| Mechanism | What it is | Usable on `lans-h.cc`? |
+|---|---|---|
+| **Externally shared dashboard** (ex-"public dashboard") | a login-free public URL | a **link** out to `*.grafana.net`, not an embed |
+| **Snapshot** | a frozen point-in-time copy | same — a link, and the data never updates |
+| **PNG / PDF export** | a rendered image | yes, if something fetches it on a schedule |
+
+Two further limits worth knowing before choosing the shared-dashboard route:
+**template variables are not supported** (so any dashboard using `$namespace`
+must be rebuilt with values hardcoded), and **query caching and rate limiting are
+Enterprise features** — a public URL that a crawler finds is a public URL that
+spends your free-tier query budget.
+
+*選 shared-dashboard 這條路之前還要知道兩件事:**不支援 template variables**(任何用到
+`$namespace` 的 dashboard 都得重做一份把值寫死),以及 **query caching 與 rate limiting
+是 Enterprise 功能** —— 公開 URL 被爬蟲找到,就是有人在花你免費層的查詢額度。*
+
+### 5.2 The route that does work — Grafana OSS as a UI layer only
+
+*可行的那條路 —— Grafana OSS 只當 UI 層*
+
+Run Grafana OSS on the cluster (~150 MB class, an order of magnitude lighter than
+Prometheus) with its datasource pointing back at **Grafana Cloud's** Prometheus.
+`allow_embedding` and `auth.anonymous` are then your own config file, so
+`<iframe>` works.
+
+*在叢集上跑一份 Grafana OSS(約 150 MB 級距,比 Prometheus 輕一個量級),datasource 指
+回 **Grafana Cloud** 的 Prometheus。`allow_embedding` 和 `auth.anonymous` 就變成你自己
+的設定檔,`<iframe>` 因此可用。*
+
+**This does not violate the offload principle** (`README.md`: "a monitor must
+never compete for the resources it is monitoring"). The heavy half — TSDB
+storage, query execution, 14-day retention — stays rented. What lands on `louis2`
+is only "turn a query result into a picture". The split is storage-and-query
+remote, rendering local, and that is a defensible line rather than a slide back
+toward self-hosting.
+
+***這不違反 offload 原則**(`README.md`:「監控系統絕不該跟它監控的對象搶資源」)。
+重的那半 —— TSDB 儲存、查詢執行、14 天保留 —— 仍然是租的,落在 `louis2` 上的只有「把
+查詢結果畫成圖」。分界是「儲存與查詢在遠端、渲染在本地」,這是一條站得住腳的線,不是
+偷偷滑回自架。*
+
+Cost: one more Deployment, one more Ingress, one config file, and a
+**`metrics:read`** access policy — which the Alloy token deliberately is not (see
+runbook §0c). Two separate policies, never one with both scopes.
+
+*代價:多一個 Deployment、一個 Ingress、一份設定檔,以及一組 **`metrics:read`** access
+policy —— Alloy 那支是刻意沒有讀取權限的(見 runbook §0c)。兩組獨立 policy,絕不要
+一組勾兩個 scope。*
+
+The cheaper alternative, if interaction is not needed: a systemd timer that hits
+Grafana's render API and drops PNGs into `my_website`'s static tree. `my_website`
+is a static nginx site with no backend, so this needs nothing new running — the
+`observability-metrics.timer` pattern already exists. Static, delayed, not
+clickable.
+
+*不需要互動的話有更省事的做法:一個 systemd timer 打 Grafana 的 render API,把 PNG 丟進
+`my_website` 的靜態目錄。`my_website` 是沒有後端的 nginx 靜態站,這條不需要新增任何常駐
+的東西 —— `observability-metrics.timer` 的模式已經在了。缺點是靜態、有延遲、不能點。*
+
+### 5.3 The part that must be settled first — what a public dashboard leaks
+
+*必須先解決的部分 —— 公開 dashboard 會洩漏什麼*
+
+This repo already keeps **two copies of `topology.html`**: the full internal one
+here, and a security-redacted one in `my_website/public`. Publishing a dashboard
+built from these metrics walks straight through that redaction. It exposes
+namespace names (which *are* the app names), `pg_database_size_bytes{datname=…}`
+per app, pod names, container log paths, and the node's remaining memory and
+disk. That is a ready-made reconnaissance surface, and it contradicts a
+decision this repo has already made deliberately.
+
+*這個 repo 已經維持**兩份 `topology.html`**:這裡是完整的內部版,`my_website/public` 是
+做過 security redaction 的公開版。把這些指標做成的 dashboard 發布出去,等於直接穿過那道
+redaction。它會露出 namespace 名(那**就是** app 名)、每個 app 的
+`pg_database_size_bytes{datname=…}`、pod 名稱、container log 路徑,以及節點剩餘的記憶體
+與磁碟。那是現成的偵察面,而且牴觸這個 repo 已經刻意做過的決定。*
+
+So the rule is: **build a separate dashboard for public consumption**, containing
+only deliberately chosen panels (uptime, request rate, one or two aggregate
+curves) — never expose the internal one. Note that the shared-dashboard route
+forces a rebuild anyway (§5.1, no template variables), so the security
+requirement and the product limit point at the same action.
+
+*所以規則是:**另外做一份給公開看的 dashboard**,只放刻意挑過的 panel(uptime、request
+rate、一兩條聚合曲線)—— 絕不要把內部那份開放出去。順帶一提,shared-dashboard 這條路
+本來就強迫你重做一份(§5.1,不支援 template variables),所以安全需求和產品限制指向
+同一個動作。*
+
+### 5.4 Decision / 決定
+
+**Deferred, not rejected.** Apply the stack first, let it collect for a few days,
+then decide once there are real dashboards to judge. The only thing brought
+forward is runbook §0c's optional read-only policy — recorded there now because
+Step 0 has not been run yet, and adding a second access policy while you are
+already in that UI costs nothing, whereas coming back later means a second pass.
+
+***延後,不是否決。**先把 stack 上線、收幾天資料,等有真正的 dashboard 可以評估再決定。
+唯一提前處理的是 runbook §0c 那組選配的唯讀 policy —— 現在記進去,是因為 Step 0 還沒
+跑,人已經在那個 UI 裡時多建一組 access policy 不花成本,之後再回頭就是多跑一趟。*
 
 ---
 
