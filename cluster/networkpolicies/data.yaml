@@ -2,8 +2,9 @@
 #
 # INGRESS ONLY in this pass. Postgres egress is deliberately left unrestricted:
 # it is the shared dependency for three apps, so a mistake there has the largest
-# blast radius. Restricting it is worth doing as a separate change — see
-# cluster/networkpolicies/README.md.
+# blast radius. Restricting it is worth doing as a separate change — tracked as
+# B-9 in docs/security-posture-audit-remediation-plan.md §0; target rule is
+# egress DNS only. See also cluster/networkpolicies/README.md.
 #
 # 這一輪只管 ingress。刻意不限制 Postgres 的 egress:它是三個 app 的共用依賴,
 # 在那裡出錯影響半徑最大,值得獨立成一次可單獨驗證的變更。

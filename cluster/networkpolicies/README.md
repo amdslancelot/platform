@@ -105,9 +105,15 @@ allowance is a smaller privilege on the same port, not a wider one. See
 —— 2026-08-02 隨 observability stack 加入。exporter 用的是 `pg_monitor` role,讀得到
 統計視圖、讀不到 app 資料,所以這是「同一個埠、更小的權限」,不是放寬。*
 
-## Known gap left for a follow-up
+## Known gap left for a follow-up — tracked as B-9
 
-*留給後續的已知缺口*
+*留給後續的已知缺口 —— 追蹤編號 B-9*
+
+Tracked in `docs/security-posture-audit-remediation-plan.md` §0 as **B-9**, which
+is also why B-3 is marked *partial* there rather than plain done.
+
+*在 `docs/security-posture-audit-remediation-plan.md` §0 以 **B-9** 追蹤;那也是
+B-3 在該表標為 *partial* 而非單純 done 的原因。*
 
 `data.yaml` policies **ingress only**. Postgres egress is deliberately left
 unrestricted in this pass: it is the shared dependency for three apps, so a
