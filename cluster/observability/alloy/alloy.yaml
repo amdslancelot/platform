@@ -55,6 +55,19 @@ data:
       }
     }
 
+    // NOTE the forward_to: this one goes through a filter, not straight to
+    // remote_write. Measured 2026-08-04, the raw kubelet endpoint produced
+    // 46,563 samples per scrape — 88% of the fleet's entire volume and 4.6x the
+    // whole 10k free-tier ceiling on its own. Almost all of it is histogram
+    // buckets (rest_client_request_duration_seconds_bucket,
+    // kubelet_runtime_operations_duration_seconds_bucket, storage_operation_*),
+    // which nobody here queries. The per-app CPU/RAM this stack exists for comes
+    // from cadvisor (3,117 samples), not from here.
+    //
+    // 注意 forward_to:這一個先經過 filter,不是直接進 remote_write。2026-08-04 實測,
+    // 未過濾的 kubelet 端點每次 scrape 產生 46,563 個樣本 —— 佔整個機隊的 88%,單這一個
+    // job 就是 10k 免費上限的 4.6 倍。絕大部分是 histogram 的 bucket,而這裡沒有人查它們。
+    // 這個 stack 真正要的 per-app CPU/RAM 來自 cadvisor(3,117),不是這裡。
     prometheus.scrape "kubelet" {
       targets           = discovery.relabel.kubelet.output
       job_name          = "kubelet"
@@ -62,7 +75,30 @@ data:
       metrics_path      = "/metrics"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
       tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.relabel.kubelet_keep.receiver]
+    }
+
+    // Allowlist, not a blocklist: keep a named handful, drop everything else.
+    // A blocklist would silently re-admit whatever a future kubelet version adds.
+    //
+    // `up` and the `scrape_*` series are synthetic — the scraper appends them
+    // AFTER the target's own payload. In Prometheus proper, metric_relabel_configs
+    // never sees them; in Alloy they flow through this component like any other
+    // sample, so they must be kept explicitly. Omit them and `up{job="kubelet"}`
+    // silently disappears — the target would look down while being perfectly fine.
+    //
+    // 用 allowlist 而非 blocklist:只留指名的幾個,其餘全丟。blocklist 會在未來 kubelet
+    // 版本新增指標時默默把它們放進來。`up` 與 `scrape_*` 是 scraper 事後附加的合成
+    // series —— 在 Prometheus 本體裡 metric_relabel_configs 看不到它們,但在 Alloy 裡
+    // 它們跟一般樣本一樣流經這個元件,所以必須明確保留。漏掉的話 `up{job="kubelet"}`
+    // 會消失,target 看起來像掛了,實際上好端端的。
+    prometheus.relabel "kubelet_keep" {
       forward_to = [prometheus.remote_write.grafanacloud.receiver]
+      rule {
+        source_labels = ["__name__"]
+        action        = "keep"
+        regex = "up|scrape_.*|kubernetes_build_info|kubelet_running_pods|kubelet_running_containers|kubelet_volume_stats_(available|capacity|used)_bytes|kubelet_volume_stats_inodes(_free|_used)?|kubelet_runtime_operations_total|kubelet_runtime_operations_errors_total|kubelet_started_containers_errors_total|kubelet_certificate_manager_client_ttl_seconds|kubelet_node_config_error"
+      }
     }
 
     // cAdvisor: the per-container (=> per-app) CPU/RAM/fs/io series.

@@ -412,6 +412,73 @@ switching backend later is a change to one `remote_write` block.
 決定。** 這樣就把整個決策所依賴的那一個數字從估算變成實測,而且不花成本 —— 之後換後
 端只是改一個 `remote_write` 區塊。*
 
+### 2.7 Measured 2026-08-04 — the estimate was wrong, and only in one place
+
+*2026-08-04 實測 —— 估算錯了,而且只錯在一個地方*
+
+Step 3 shipped, then `sum by (job) (scrape_samples_scraped{cluster="fra-k3s"})`:
+
+*Step 3 上線後量到:*
+
+| job | samples / scrape | share |
+|---|---|---|
+| **kubelet** | **46,563** | **88.6%** |
+| cadvisor | 3,117 | 5.9% |
+| node-exporter | 1,390 | 2.6% |
+| app-pods | 853 | 1.6% |
+| postgres | 655 | 1.2% |
+| **total** | **52,578** | — |
+
+**5.3x the 10k free-tier ceiling**, against an estimate of 8–15k. The estimate was
+not uniformly optimistic — every other job came in at or below it. The entire
+error is `kubelet`, whose `/metrics` is mostly histogram buckets
+(`rest_client_request_duration_seconds_bucket`,
+`kubelet_runtime_operations_duration_seconds_bucket`, `storage_operation_*`).
+A histogram costs *buckets × label combinations* series, so a handful of them
+outweighs every real metric on the node combined.
+
+***是 10k 免費上限的 5.3 倍**,而估算是 8–15k。但估算不是全面偏樂觀 —— 其他每個 job 都
+落在估算之內或以下,**誤差全部來自 `kubelet`**:它的 `/metrics` 絕大部分是 histogram 的
+bucket。一個 histogram 的成本是「桶數 × 標籤組合」條 series,所以少數幾個 histogram 就
+壓過節點上所有真實指標的總和。*
+
+**Fixed the same day** with a `prometheus.relabel` allowlist on the kubelet job
+(see `alloy/alloy.yaml`), keeping ~50 series — pod/container counts, PVC volume
+stats, runtime-operation and error counters, kubelet client-cert TTL, plus `up`
+and the `scrape_*` synthetics. New total ≈ **6.1k, about 60% of the free tier**,
+with room for app opt-ins.
+
+***當天修掉**:在 kubelet job 上加一段 `prometheus.relabel` allowlist(見
+`alloy/alloy.yaml`),保留約 50 條 —— pod/container 數量、PVC volume stats、runtime
+operation 與 error 計數、kubelet client cert TTL,以及 `up` 和 `scrape_*` 合成 series。
+新的總量約 **6.1k,約佔免費層的 60%**,還留得下之後 app opt-in 的空間。*
+
+Two consequences for §2's decision:
+
+*對 §2 決策的兩個影響:*
+
+1. **The argument for self-hosting got weaker, not stronger.** The 10k ceiling is
+   not being reached by this fleet's real metrics — it was being blown by one
+   endpoint's histograms, and that is a filtering problem, not a capacity one.
+   Self-hosting would have inherited the same 46k and just paid RAM for it.
+   *自架的理由變弱了,不是變強。10k 不是被這個機隊的真實指標頂到的,是被單一端點的
+   histogram 撐爆的 —— 那是過濾問題,不是容量問題。自架只會原封不動繼承那 46k,然後
+   用記憶體去付帳。*
+2. **Longer scrape intervals would not have helped.** The free tier meters
+   *active series*, not samples per second; a 60s → 5m interval coarsens the data
+   and removes zero series. Worth stating because it is the first thing people
+   reach for.
+   *拉長 scrape interval 沒有用。免費層算的是 **active series**,不是每秒樣本數;
+   60s 改 5m 只會讓資料變粗,一條 series 都不會少。寫下來是因為這是大家第一個會想到的
+   做法。*
+
+`README.md`'s "10k is enough for this fleet" turns out to be **correct after
+filtering** — the sentence was not wrong, it was just never true of an unfiltered
+kubelet.
+
+*`README.md` 寫「10k 對這個機隊夠用」在**過濾之後是對的** —— 那句話沒錯,只是對未經
+過濾的 kubelet 從來就不成立。*
+
 ---
 
 ## 3. The two free Frankfurt micros — measured 2026-08-02
