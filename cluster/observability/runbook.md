@@ -140,10 +140,10 @@ token 那串字就是 Alloy 要用的密碼。*
 
 ```
 Portal → Access Policies → "Create access policy"
-  Display name : louis2-alloy            ← 一台機器一個 policy,撤銷時不影響其他
+  Display name : fra-alloy               ← 一個 cluster 一個 policy,撤銷時不影響其他
   Realm        : your stack
   Scopes       : metrics:write           ← ONLY this one. 不要勾 read / 不要勾 logs / traces
-Then: on that policy → "Add token" → name louis2-alloy-token → expiry:
+Then: on that policy → "Add token" → name fra-alloy-token → expiry:
   set one (e.g. 1 year) rather than "no expiration", and note the date.
 Copy the token NOW — it is shown exactly once. 只會顯示一次。
 ```
