@@ -443,15 +443,46 @@ bucket。一個 histogram 的成本是「桶數 × 標籤組合」條 series,所
 壓過節點上所有真實指標的總和。*
 
 **Fixed the same day** with a `prometheus.relabel` allowlist on the kubelet job
-(see `alloy/alloy.yaml`), keeping ~50 series — pod/container counts, PVC volume
-stats, runtime-operation and error counters, kubelet client-cert TTL, plus `up`
-and the `scrape_*` synthetics. New total ≈ **6.1k, about 60% of the free tier**,
-with room for app opt-ins.
+(see `alloy/alloy.yaml`). Measured after applying: kubelet went 46,772 → **36
+series**, and the fleet total to **6,033 — 60% of the free tier**, with room for
+app opt-ins.
 
 ***當天修掉**:在 kubelet job 上加一段 `prometheus.relabel` allowlist(見
-`alloy/alloy.yaml`),保留約 50 條 —— pod/container 數量、PVC volume stats、runtime
-operation 與 error 計數、kubelet client cert TTL,以及 `up` 和 `scrape_*` 合成 series。
-新的總量約 **6.1k,約佔免費層的 60%**,還留得下之後 app opt-in 的空間。*
+`alloy/alloy.yaml`)。套用後實測:kubelet 從 46,772 降到 **36 條**,機隊總量降到
+**6,033 —— 免費層的 60%**,還留得下之後 app opt-in 的空間。*
+
+Four allowlist entries matched nothing, for two different reasons that must not
+be confused. `kubelet_runtime_operations_errors_total`,
+`kubelet_started_containers_errors_total` and `kubelet_node_config_error` are
+counters that only exist once the condition has occurred — they are **kept
+deliberately**, so that the day they appear they are already allowed through. But
+`kubelet_certificate_manager_client_ttl_seconds` is absent because this kubelet
+does not expose it at all, so the "kubelet client-cert expiry" benefit claimed for
+this allowlist **does not exist**. Certificate expiry is covered instead by
+cert-manager's `certmanager_certificate_expiration_timestamp_seconds` under
+`job="app-pods"`, which watches the `*.lans-h.cc` wildcard — the one that matters.
+
+*有四個 allowlist 條目沒有對到任何指標,原因有兩種,不能混為一談。
+`kubelet_runtime_operations_errors_total`、`kubelet_started_containers_errors_total`、
+`kubelet_node_config_error` 是「發生過才存在」的 counter —— 它們是**刻意保留**的,
+為的是在真的出現的那天已經被放行。但 `kubelet_certificate_manager_client_ttl_seconds`
+不存在是因為這個 kubelet 根本不吐它,所以這份 allowlist 宣稱的「kubelet client cert
+到期」這個好處**並不存在**。憑證到期改由 `job="app-pods"` 底下 cert-manager 的
+`certmanager_certificate_expiration_timestamp_seconds` 涵蓋,它看的是
+`*.lans-h.cc` wildcard —— 真正要緊的那張。*
+
+Also worth recording: `scrape_samples_post_metric_relabeling` **cannot** show this
+filter's effect. That series is emitted by the `prometheus.scrape` component and
+reflects only relabeling configured *inside* it; a downstream `prometheus.relabel`
+component is invisible to it, so the value stays equal to
+`scrape_samples_scraped`. Verify with `count by (__name__) ({job="kubelet"})`
+over a recent time range instead.
+
+*另外值得記下:`scrape_samples_post_metric_relabeling` **看不出**這個過濾的效果。
+那條 series 由 `prometheus.scrape` 元件發出,只反映該元件**內部**設定的 relabel;
+下游的 `prometheus.relabel` 元件對它是隱形的,所以數值會一直等於
+`scrape_samples_scraped`。要驗證請改用 `count by (__name__) ({job="kubelet"})`,
+並把時間範圍縮到最近幾分鐘。*
 
 Two consequences for §2's decision:
 
