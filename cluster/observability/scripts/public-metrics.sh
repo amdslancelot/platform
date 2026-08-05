@@ -82,6 +82,62 @@ vector() {
 }
 
 # ---------------------------------------------------------------------------
+# History, for the line charts.
+#
+# The whole window is re-fetched every run rather than appended to a stored
+# series. That is more queries, and it is worth it: there is no warm-up after a
+# first deploy, no state to corrupt, and a gap caused by a failed run heals by
+# itself on the next one. An append-only history in the ConfigMap would have to
+# be right forever; this only has to be right now.
+#
+# 每次執行都重抓整段窗口,而不是把新點附加到已存的序列上。查詢比較多,但值得:
+# 第一次部署不用暖機、沒有狀態會壞掉、某次失敗造成的缺口下一次就自己補上。
+# 附加式的歷史必須永遠正確,這個只要當下正確。
+# ---------------------------------------------------------------------------
+RANGE_SECONDS=$(( 24 * 3600 ))
+RANGE_STEP=900                     # 15m — 97 points over 24h
+# Align to the step so every series lands on the SAME grid; unaligned starts give
+# each query its own timestamps and the arrays stop corresponding.
+RANGE_END=$(( $(date +%s) / RANGE_STEP * RANGE_STEP ))
+RANGE_START=$(( RANGE_END - RANGE_SECONDS ))
+RANGE_POINTS=$(( RANGE_SECONDS / RANGE_STEP + 1 ))
+
+# range_vector <promql> <label> -> [{"key":…,"values":[…|null]}, …]
+# Values are aligned onto the fixed grid and PADDED WITH null where a series has
+# no sample. Without that, a series that started late would be shorter and the
+# page would draw it against the wrong timestamps — silently, and plausibly.
+range_vector() {
+  local q="$1" l="$2" out
+  out="$(curl -sS --max-time 30 -u "${PROM_USER}:${PROM_READ_TOKEN}" \
+              --data-urlencode "query=${q}" \
+              --data-urlencode "start=${RANGE_START}" \
+              --data-urlencode "end=${RANGE_END}" \
+              --data-urlencode "step=${RANGE_STEP}" \
+              "${PROM_QUERY_URL}/api/v1/query_range")" || {
+    echo "ERROR: range transport failed: ${q}" >&2; return 1; }
+  if [ "$(printf '%s' "$out" | jq -r '.status')" != "success" ]; then
+    echo "ERROR: range query rejected: ${q}" >&2
+    printf '%s\n' "$out" | jq -r '.error // .errorType // "unknown"' >&2
+    return 1
+  fi
+  # An empty label means the query returns ONE unlabelled series (a node-level
+  # ratio); it gets the fixed key "_" so it survives the same code path.
+  printf '%s' "$out" | jq -c \
+    --arg l "$l" --argjson start "$RANGE_START" \
+    --argjson step "$RANGE_STEP" --argjson n "$RANGE_POINTS" '
+    [range(0; $n) | ($start + . * $step)] as $grid
+    | [ .data.result[]
+        | { key: (if $l == "" then "_" else .metric[$l] end),
+            lut: (.values | map({(.[0] | floor | tostring): (.[1] | tonumber)}) | add // {}) }
+        | select(.key != null)
+        # bind the row before mapping the grid — inside `$grid | map(...)` the
+        # input is the timestamp, so `.lut` would resolve against a number.
+        | . as $s
+        | { key: $s.key,
+            values: ($grid | map($s.lut[(. | tostring)])) } ]'
+}
+
+# ---------------------------------------------------------------------------
 # The allowlist. A namespace absent from this map is DROPPED, not passed
 # through — new namespaces do not leak by default.
 # 白名單:不在這張表裡的 namespace 直接丟掉,新增的 namespace 不會預設外洩。
@@ -207,6 +263,30 @@ img_containerd="$(scalar \
 img_podman="$(scalar \
   "image_store_disk_bytes{${C}, store=\"podman\"} / on(instance) group_left() node_filesystem_size_bytes{${C}, mountpoint=\"/var/lib/containers\"}")"
 
+# --- history for the line charts -------------------------------------------
+# Every one of these is a RATIO, for the same reason the instant fields are: the
+# document is public, and a byte series over time discloses the same totals a
+# single byte figure would, plus the growth rate.
+echo "==> querying 24h history"
+MEM_IN_USE="scalar(node_memory_MemTotal_bytes{${C}} - node_memory_MemAvailable_bytes{${C}})"
+
+range_vector "1 - avg(rate(node_cpu_seconds_total{${C}, mode=\"idle\"}[5m]))" "" \
+  > "$work/h_cpu.json"
+range_vector "1 - (node_memory_MemAvailable_bytes{${C}} / node_memory_MemTotal_bytes{${C}})" "" \
+  > "$work/h_mem.json"
+range_vector "1 - (node_filesystem_avail_bytes{${C}, ${MPS}} / node_filesystem_size_bytes{${C}, ${MPS}})" \
+  mountpoint > "$work/h_vol.json"
+range_vector "sum by (namespace) (container_memory_working_set_bytes{${CADV}}) / scalar(node_memory_MemTotal_bytes{${C}})" \
+  namespace > "$work/h_wmem.json"
+range_vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m])) / scalar(count(count by (cpu) (node_cpu_seconds_total{${C}, mode=\"idle\"})))" \
+  namespace > "$work/h_wcpu.json"
+range_vector "sum(${PGH}) / clamp_min(sum(${PGH}) + sum(${PGR}), 1)" "" \
+  > "$work/h_pgcache.json"
+# Logs against the space still FREE, not against the volume size — the gap
+# closing is the failure, and the ratio rises if either side moves.
+range_vector "pod_log_total_bytes{${C}} / on(instance) group_left() node_filesystem_avail_bytes{${C}, mountpoint=\"/\"}" "" \
+  > "$work/h_logs.json"
+
 vector "sum by (namespace) (container_memory_working_set_bytes{${CADV}})" namespace > "$work/mem.json"
 vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m]))" namespace > "$work/cpu.json"
 
@@ -219,6 +299,15 @@ jq -n \
   --slurpfile cpu "$work/cpu.json" \
   --slurpfile db "$work/db.json" \
   --slurpfile fs "$work/fs.json" \
+  --slurpfile h_cpu "$work/h_cpu.json" \
+  --slurpfile h_mem "$work/h_mem.json" \
+  --slurpfile h_vol "$work/h_vol.json" \
+  --slurpfile h_wmem "$work/h_wmem.json" \
+  --slurpfile h_wcpu "$work/h_wcpu.json" \
+  --slurpfile h_pgcache "$work/h_pgcache.json" \
+  --slurpfile h_logs "$work/h_logs.json" \
+  --argjson range_start "$RANGE_START" \
+  --argjson range_step "$RANGE_STEP" \
   --argjson labels "$NS_LABELS" \
   --argjson dblabels "$DB_LABELS" \
   --argjson mplabels "$MP_LABELS" \
@@ -343,7 +432,42 @@ jq -n \
               mem_of_capacity: ((.value / $mem_total) | r4),
               cpu_of_capacity: ((($cpumap[.key] // 0) / $cpu_cores) | r4) })
       | sort_by(-.mem_of_capacity)
-    )
+    ),
+    # ---------------------------------------------------------------------
+    # History for the line charts. One shared time base — every series is on
+    # the SAME aligned grid, so the page stores no per-point timestamps and a
+    # chart cannot draw one series against the clock of another.
+    # (No apostrophes in this block — it is inside a single-quoted jq program and
+    # one of them silently terminates the shell string. Third time.)
+    # Gaps are null, never 0: a collector that was down is not a node that was
+    # idle, and a line dropping to the floor says the second thing.
+    #
+    # 共用一組時間基準:所有 series 都在同一個對齊的格線上,所以頁面不需要存每個點的
+    # 時間戳,也不可能把某條線畫在另一條的時鐘上。缺口是 null 不是 0 ——
+    # 採集器掛掉不等於節點閒置,而一條掉到底的線講的是後者。
+    # ---------------------------------------------------------------------
+    history: (
+      def series($raw; $map):
+        ($raw[0] // [])
+        | map(select($map == null or $map[.key] != null))
+        | map({ name: (if $map == null then .key else $map[.key] end),
+                values: (.values | map(if . == null then null else (. | r4) end)) });
+      def rename($n): map(.name = $n);
+      def newest: (.values | map(select(. != null)) | last // 0);
+      (series($h_cpu; null)     | rename("CPU"))      as $ncpu     |
+      (series($h_mem; null)     | rename("Memory"))   as $nmem     |
+      (series($h_pgcache; null) | rename("Cache hit")) as $npg     |
+      (series($h_logs; null)    | rename("Logs vs free space")) as $nlog |
+      {
+        start_unix:      $range_start,
+        step_seconds:    $range_step,
+        node:            ($ncpu + $nmem),
+        volumes:         (series($h_vol; $mplabels)  | sort_by(- newest)),
+        workload_memory: (series($h_wmem; $labels)   | sort_by(- newest)),
+        workload_cpu:    (series($h_wcpu; $labels)   | sort_by(- newest)),
+        pg_cache:        $npg,
+        logs:            $nlog
+      })
   }' > "$work/metrics.json"
 
 # Refuse to publish an obviously broken snapshot. Overwriting a good ConfigMap
