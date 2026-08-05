@@ -1,0 +1,23 @@
+# Refresh the public snapshot every 5 minutes.
+#
+# Why 5m and not faster: a kubelet ConfigMap-volume update propagates on its own
+# sync period (~60s) anyway, and every run spends Grafana Cloud query budget —
+# which on the free tier is not metered generously and has no caching (query
+# caching is an Enterprise feature, pending.md §5.1). 5m is well inside "live
+# enough" for a public page and keeps ~288 queries/day.
+#
+# 每 5 分鐘更新一次。更快沒有意義(ConfigMap 掛載本來就有約 60s 的同步週期),而且
+# 每次都在花 Grafana Cloud 的查詢額度 —— 免費層沒有 query caching。
+[Unit]
+Description=Refresh the public fleet snapshot every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+# Spread it off the top of the minute so it does not land with every other timer.
+RandomizedDelaySec=20s
+Persistent=true
+Unit=public-metrics.service
+
+[Install]
+WantedBy=timers.target

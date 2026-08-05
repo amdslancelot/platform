@@ -1,0 +1,27 @@
+# Host-side textfile metrics producer (image footprint + log sizes). oneshot,
+# fired by observability-metrics.timer. Writes .prom files that the in-cluster
+# node-exporter DaemonSet exposes via its textfile collector.
+#
+# Install: sudo bash cluster/observability/scripts/install-metrics-timer.sh
+#
+# ExecStart deliberately points at /usr/local/sbin, NOT at the checkout in
+# ~opc/platform. SELinux is Enforcing on this node and everything under /home
+# carries user_home_t, which systemd's init_t may not execute: a unit running
+# straight out of the checkout fails with 203/EXEC "Permission denied" even
+# though the file is 0755 — it reads like a chmod problem and is not one. The
+# installer copies both scripts to /usr/local/sbin (bin_t, same as the webhook
+# binary) and restorecons them. Same reason node/prune-images.service does it.
+#
+# SELinux Enforcing:/home 下是 user_home_t,systemd 不能執行,所以腳本要裝到
+# /usr/local/sbin(bin_t)而不是直接跑 checkout 裡那份。
+[Unit]
+Description=Fleet observability textfile metrics (image + log sizes)
+After=k3s.service
+
+[Service]
+Type=oneshot
+User=root
+# Ensure the shared textfile dir exists before either script runs.
+ExecStartPre=/usr/bin/mkdir -p /var/lib/node_exporter/textfile_collector
+ExecStart=/usr/local/sbin/image-metrics.sh
+ExecStart=/usr/local/sbin/log-size.sh

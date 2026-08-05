@@ -27,18 +27,38 @@ inspection. **No change has been applied yet.** Where this document contradicts
 |---|---|---|---|---|
 | B-1 | Disable `rpcbind` | platform (node) | none | ✅ **done 2026-07-28** |
 | B-2 | PSA labels, `warn`+`audit` only | platform repo | none | ✅ **done 2026-07-28** |
-| B-3 | NetworkPolicy per namespace | platform repo | none if correct | ✅ **done 2026-07-28** |
+| B-3 | NetworkPolicy per namespace | platform repo | none if correct | ✅ **done 2026-07-28** — *partial: `data` egress deferred, see B-9* |
 | B-4 | `postgres` resource limits | platform repo | **~30s DB restart** | ✅ **done 2026-07-28** — actual gap ~5s *實際中斷約 5 秒* |
 | B-5 | `securityContext` — gelp, transigen | **gelp / transigen repos** | none (surge rollout) | ❌ not started |
 | B-6 | `lans-h-site` → non-root nginx | **my_website repo** | apex site rollout | ❌ not started |
 | B-7 | `postgres` → non-root | platform repo | **maintenance window** | ❌ not started |
 | B-8 | kubeconfig `0600` + scoped RBAC | platform (node) | breaks all deploys if rushed | ❌ not started |
+| B-9 | `data` egress → DNS only | platform repo | **all 3 apps if wrong** | ❌ not started — *deliberately deferred out of B-3* |
 
 **B-1 through B-4 are entirely platform-owned and reversible.** B-5 onward reach
 into sibling app repos or carry real outage risk.
 
 ***B-1 到 B-4 完全屬於 platform 且可回滾。** B-5 之後會動到 sibling app repo,或帶有
 實質停機風險。*
+
+**B-9 is a deferral, not an omission.** B-3 shipped every namespace's ingress and
+four of five namespaces' egress; only `data`'s egress was held back. Postgres is
+the shared dependency for `snoopy`, `gelp` and `transigen`, so a wrong rule there
+takes down three apps at once — and because a NetworkPolicy selecting a pod flips
+that whole direction to default-deny (§1.5 Trap 1), one forgotten allowance is
+enough to do it. It is worth doing — a compromised Postgres should not be able to
+open outbound connections — but as its own change that can be applied, verified
+and rolled back on its own. The rule is already specified in B-3's own per-app
+table: `data` egress is **DNS only**. Recorded in
+`cluster/networkpolicies/README.md` and in `data.yaml`'s header comment.
+
+***B-9 是延後,不是遺漏。** B-3 交付了每個 namespace 的 ingress,以及五個 namespace 中
+四個的 egress,只有 `data` 的 egress 保留下來。Postgres 是 `snoopy`、`gelp`、`transigen`
+的 shared dependency,那裡寫錯就是三個 app 一起倒 —— 而且 NetworkPolicy 只要選中某個
+pod,那個方向就整個變成 default-deny(§1.5 Trap 1),漏掉一條放行就足以造成。這件事值得
+做(被攻陷的 Postgres 不該能開 outbound 連線),但要獨立成一次能單獨 apply、單獨驗證、
+單獨 rollback 的變更。規則在 B-3 自己的 per-app 表裡已經定好:`data` 的 egress 是
+**DNS only**。記錄在 `cluster/networkpolicies/README.md` 與 `data.yaml` 的檔頭註解。*
 
 ---
 
@@ -566,7 +586,7 @@ Calendar,gelp 連 Google Places / Drive,transigen 連 YouTube / Spotify。`excep
 | `snoopy` | **none needed** — no Service, no Ingress; it is a Discord bot with outbound only *完全不需要* | DNS + postgres + internet |
 | `web/lans-h-site` | Traefik → `:80` | DNS only — static site, no DB, no outbound *只要 DNS* |
 | `gelp`, `transigen` | Traefik → `:3000` | DNS + postgres + internet |
-| `data` | only from `gelp`/`transigen`/`snoopy` on `:5432` *只接受這三個 namespace 的 5432* | DNS only |
+| `data` | only from `gelp`/`transigen`/`snoopy` on `:5432` *只接受這三個 namespace 的 5432* | DNS only — ⚠️ **not applied; deferred to B-9** *未套用,延後為 B-9* |
 
 **Execution order / 執行順序** — one namespace at a time, verify, then proceed.
 `web` first (simplest), then `snoopy` (easiest to verify — say something in

@@ -1,0 +1,324 @@
+# Grafana Alloy — the fleet's metrics collector. It scrapes every on-node
+# source and remote_writes the samples OFF the node to Grafana Cloud, so the
+# 2-OCPU/12GB node keeps NONE of the TSDB/query/dashboard load (the whole point
+# of the offload design — the monitor must not compete with what it monitors).
+#
+# The Alloy config lives in the ConfigMap below (single source of truth); the
+# Grafana Cloud credentials come from the `grafana-cloud` Secret, created
+# out-of-band (see runbook) so no API key is committed to git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: observability
+data:
+  config.alloy: |
+    // -----------------------------------------------------------------------
+    // Fleet observability collector. Sources -> Grafana Cloud remote_write.
+    //   kubelet + cAdvisor   -> per-app CPU / RAM / disk-I/O (by namespace/pod)
+    //   node-exporter        -> host disk space + image/log textfile metrics
+    //   postgres-exporter    -> per-app DB size, connections, cache/tx
+    // -----------------------------------------------------------------------
+    logging { level = "info" }
+
+    // -- Grafana Cloud sink (creds injected from the grafana-cloud Secret) --
+    prometheus.remote_write "grafanacloud" {
+      endpoint {
+        url = sys.env("GRAFANA_CLOUD_PROM_URL")
+        basic_auth {
+          username = sys.env("GRAFANA_CLOUD_PROM_USER")
+          password = sys.env("GRAFANA_CLOUD_PROM_PASSWORD")
+        }
+      }
+      // Identify the SOURCE CLUSTER, not the node — `node` is already attached
+      // per-target below. Injected from env so a second cluster (e.g. one stood
+      // up on the unused ARM allowance) sets its own value and its series do not
+      // silently merge with this one's in the same Grafana Cloud stack.
+      external_labels = { cluster = sys.env("CLUSTER_NAME"), fleet = "lans-h-cc" }
+    }
+
+    // -- Node discovery -----------------------------------------------------
+    discovery.kubernetes "nodes" { role = "node" }
+
+    // kubelet + cAdvisor are scraped straight off the node InternalIP:10250.
+    discovery.relabel "kubelet" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+        target_label  = "__address__"
+        regex         = "(.+)"
+        replacement   = "${1}:10250"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    // NOTE the forward_to: this one goes through a filter, not straight to
+    // remote_write. Measured 2026-08-04, the raw kubelet endpoint produced
+    // 46,563 samples per scrape — 88% of the fleet's entire volume and 4.6x the
+    // whole 10k free-tier ceiling on its own. Almost all of it is histogram
+    // buckets (rest_client_request_duration_seconds_bucket,
+    // kubelet_runtime_operations_duration_seconds_bucket, storage_operation_*),
+    // which nobody here queries. The per-app CPU/RAM this stack exists for comes
+    // from cadvisor (3,117 samples), not from here.
+    //
+    // 注意 forward_to:這一個先經過 filter,不是直接進 remote_write。2026-08-04 實測,
+    // 未過濾的 kubelet 端點每次 scrape 產生 46,563 個樣本 —— 佔整個機隊的 88%,單這一個
+    // job 就是 10k 免費上限的 4.6 倍。絕大部分是 histogram 的 bucket,而這裡沒有人查它們。
+    // 這個 stack 真正要的 per-app CPU/RAM 來自 cadvisor(3,117),不是這裡。
+    // scrape_interval 5m, not the 60s default: the allowlist below drops 99.9%
+    // of this endpoint's payload, but only AFTER kubelet has serialized it and
+    // Alloy has parsed it into label sets. That parse-and-discard is what makes
+    // Alloy the heaviest namespace on this node (397 MB measured 2026-08-04),
+    // and running it 5x less often is the only lever that touches it — filtering
+    // cannot, because filtering happens downstream of the cost.
+    //
+    // Nothing is lost. Everything kept here is slow-moving (pod counts, PVC
+    // bytes, cumulative counters). Liveness is unaffected: `cadvisor` scrapes the
+    // SAME kubelet on a different path every 60s, so a dead kubelet still surfaces
+    // within a minute via up{job="cadvisor"}.
+    //
+    // scrape_interval 設 5m 而非預設的 60s:下面的 allowlist 丟掉這個端點 99.9% 的內容,
+    // 但那是在 kubelet 序列化完、Alloy 解析成 label set 之後才發生。這段「解析完再丟」
+    // 正是 Alloy 成為本節點最肥 namespace(2026-08-04 實測 397 MB)的原因,而少跑 5 倍
+    // 是唯一能碰到它的手段 —— 過濾碰不到,因為過濾在成本的下游。
+    //
+    // 不損失任何東西:留下來的全是慢速變化的指標。liveness 也不受影響 —— `cadvisor`
+    // 每 60s 抓同一個 kubelet 的另一個路徑,kubelet 掛了一分鐘內就會反映在
+    // up{job="cadvisor"} 上。
+    prometheus.scrape "kubelet" {
+      targets           = discovery.relabel.kubelet.output
+      job_name          = "kubelet"
+      scrape_interval   = "5m"
+      scheme            = "https"
+      metrics_path      = "/metrics"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.relabel.kubelet_keep.receiver]
+    }
+
+    // Allowlist, not a blocklist: keep a named handful, drop everything else.
+    // A blocklist would silently re-admit whatever a future kubelet version adds.
+    //
+    // `up` and the `scrape_*` series are synthetic — the scraper appends them
+    // AFTER the target's own payload. In Prometheus proper, metric_relabel_configs
+    // never sees them; in Alloy they flow through this component like any other
+    // sample, so they must be kept explicitly. Omit them and `up{job="kubelet"}`
+    // silently disappears — the target would look down while being perfectly fine.
+    //
+    // 用 allowlist 而非 blocklist:只留指名的幾個,其餘全丟。blocklist 會在未來 kubelet
+    // 版本新增指標時默默把它們放進來。`up` 與 `scrape_*` 是 scraper 事後附加的合成
+    // series —— 在 Prometheus 本體裡 metric_relabel_configs 看不到它們,但在 Alloy 裡
+    // 它們跟一般樣本一樣流經這個元件,所以必須明確保留。漏掉的話 `up{job="kubelet"}`
+    // 會消失,target 看起來像掛了,實際上好端端的。
+    prometheus.relabel "kubelet_keep" {
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+      rule {
+        source_labels = ["__name__"]
+        action        = "keep"
+        regex = "up|scrape_.*|kubernetes_build_info|kubelet_running_pods|kubelet_running_containers|kubelet_volume_stats_(available|capacity|used)_bytes|kubelet_volume_stats_inodes(_free|_used)?|kubelet_runtime_operations_total|kubelet_runtime_operations_errors_total|kubelet_started_containers_errors_total|kubelet_certificate_manager_client_ttl_seconds|kubelet_node_config_error"
+      }
+    }
+
+    // cAdvisor: the per-container (=> per-app) CPU/RAM/fs/io series.
+    prometheus.scrape "cadvisor" {
+      targets           = discovery.relabel.kubelet.output
+      job_name          = "cadvisor"
+      scheme            = "https"
+      metrics_path      = "/metrics/cadvisor"
+      bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      tls_config { insecure_skip_verify = true }
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- node-exporter (hostPort 9100 on the node) --------------------------
+    discovery.relabel "node_exporter" {
+      targets = discovery.kubernetes.nodes.targets
+      rule {
+        source_labels = ["__meta_kubernetes_node_address_InternalIP"]
+        target_label  = "__address__"
+        regex         = "(.+)"
+        replacement   = "${1}:9100"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    prometheus.scrape "node_exporter" {
+      targets    = discovery.relabel.node_exporter.output
+      job_name   = "node-exporter"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- postgres-exporter (ClusterIP service in this namespace) ------------
+    prometheus.scrape "postgres" {
+      targets = [{ __address__ = "postgres-exporter.observability.svc.cluster.local:9187" }]
+      job_name   = "postgres"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+
+    // -- app-level metrics via pod annotations ------------------------------
+    // Any pod annotated `prometheus.io/scrape: "true"` gets scraped — this is
+    // how an app lights up its OWN business metrics (e.g. snoopy already exports
+    // reminders_fired_total on :8080/metrics via prometheus-client; it just
+    // needed a collector). Honors prometheus.io/port and prometheus.io/path.
+    // Assumes one metrics port per pod (true across this fleet).
+    discovery.kubernetes "pods" { role = "pod" }
+
+    discovery.relabel "app_pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Only pods that opt in.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+        regex         = "true"
+        action        = "keep"
+      }
+      // Skip pods that aren't running (pending/terminating expose nothing).
+      rule {
+        source_labels = ["__meta_kubernetes_pod_phase"]
+        regex         = "Running"
+        action        = "keep"
+      }
+      // prometheus.io/path overrides the default /metrics.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+        regex         = "(.+)"
+        target_label  = "__metrics_path__"
+      }
+      // prometheus.io/port overrides the scrape port (host:port rewrite).
+      rule {
+        source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+        separator     = ";"
+        regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+        replacement   = "$1:$2"
+        target_label  = "__address__"
+      }
+      // Carry namespace/pod/app through as labels (namespace == the app).
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    prometheus.scrape "app_pods" {
+      targets    = discovery.relabel.app_pods.output
+      job_name   = "app-pods"
+      forward_to = [prometheus.remote_write.grafanacloud.receiver]
+    }
+---
+---
+# A Deployment with ONE replica, NOT a DaemonSet — deliberately.
+#
+# Every scrape below discovers its targets from the API server: `discovery.
+# kubernetes "nodes"` returns ALL nodes, and `discovery.kubernetes "pods"`
+# returns ALL pods. A DaemonSet would therefore put a collector on every node
+# and EACH of them would scrape EVERY node's kubelet/cAdvisor/node-exporter,
+# plus the one postgres-exporter, plus every annotated app pod. On a single node
+# that is invisible; the moment a second node joins, every series is produced
+# twice with identical labels — duplicate-sample rejections at remote_write and
+# a doubled active-series count against the 10k free-tier ceiling.
+#
+# Alloy holds no host state (unlike node-exporter, which must be a DaemonSet
+# because it reads the /proc of the node it runs on), so a single cluster-wide
+# collector is both correct and freely reschedulable onto any node.
+#
+# 這裡刻意用「單一 replica 的 Deployment」而不是 DaemonSet:下面每個 scrape 的目標
+# 都是向 API server 查詢得來的**全叢集**清單。若用 DaemonSet,每個節點各跑一份採集
+# 器,而每一份都會去抓「所有」節點與「所有」pod —— 單節點時看不出來,第二個節點一
+# 加入,每條 series 就會用相同標籤被送出兩次(remote_write 判為重複樣本、active
+# series 也翻倍撞上 10k 免費上限)。Alloy 不持有任何 host 狀態(node-exporter 必須
+# 是 DaemonSet,因為它要讀自己所在節點的 /proc),所以單一採集器既正確、又可以自由
+# 被排程到任何節點上。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: observability
+  labels: { app: alloy }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: alloy }
+  strategy:
+    type: Recreate            # 避免新舊兩份同時在抓 → 短暫重複樣本
+  template:
+    metadata:
+      labels: { app: alloy }
+      annotations:
+        # Roll the pod when the config changes (kubectl rollout restart also works).
+        config-hash: "replace-on-config-change"
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: docker.io/grafana/alloy:v1.5.1   # multi-arch (arm64 ok)
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy/data
+            - --server.http.listen-addr=0.0.0.0:12345
+          env:
+            # Source-cluster identity for external_labels. Change this (and only
+            # this) if a second cluster ever ships into the same Grafana stack.
+            #
+            # Named after the LOCATION, not the machine: this is a cluster label,
+            # and a cluster outlives any one node. `louis2-k3s` would have been
+            # the first member's name standing in for the whole — fine until a
+            # second node joins. `fra` = eu-frankfurt-1; a cluster in the other
+            # tenancy's us-sanjose-1 would be `sjc-k3s`, distinct without either
+            # name being tied to a VM.
+            #
+            # Changing this AFTER data exists splits the history: old samples keep
+            # `cluster="fra-k3s"`, new ones carry the new value, and queries stop
+            # joining across the rename. Decide it before Step 3, not after.
+            #
+            # 用「位置」而非「機器」命名:這是 cluster 標籤,而 cluster 的壽命長於任何
+            # 單一節點。`louis2-k3s` 是拿第一個成員的名字代稱整個叢集 —— 在第二個節點
+            # 加入前都還好。`fra` = eu-frankfurt-1;另一個 tenancy 的 us-sanjose-1 就會
+            # 是 `sjc-k3s`,兩者分得開,而且都不綁任何一台 VM。
+            #
+            # 有資料之後才改會把歷史切成兩段:舊樣本仍帶 `cluster="fra-k3s"`,新樣本帶
+            # 新值,查詢無法跨越改名接起來。要決定就在 Step 3 之前決定。
+            - name: CLUSTER_NAME
+              value: fra-k3s
+            - name: GRAFANA_CLOUD_PROM_URL
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-url } }
+            - name: GRAFANA_CLOUD_PROM_USER
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-user } }
+            - name: GRAFANA_CLOUD_PROM_PASSWORD
+              valueFrom: { secretKeyRef: { name: grafana-cloud, key: prometheus-password } }
+          ports:
+            - { name: http, containerPort: 12345 }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 400Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/alloy }
+            - { name: data,   mountPath: /var/lib/alloy/data }
+      volumes:
+        - name: config
+          configMap: { name: alloy-config }
+        # emptyDir, not a PVC — on purpose. The WAL only buffers samples that
+        # have not reached Grafana Cloud yet; it is a few minutes of data, not a
+        # database. Keeping it ephemeral means this whole stack owns NO
+        # persistent volume, so rescheduling Alloy onto another node costs at
+        # most the unsent buffer and nothing has to be migrated.
+        # 用 emptyDir 而非 PVC:WAL 只暫存「尚未送達 Grafana Cloud」的樣本,是幾分鐘
+        # 的資料而不是資料庫。保持它是暫時性的,整個 stack 就不持有任何持久卷 ——
+        # 把 Alloy 排到別的節點,代價最多是那段還沒送出的緩衝,沒有東西需要搬遷。
+        - name: data
+          emptyDir: {}

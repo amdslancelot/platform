@@ -1,0 +1,13 @@
+# Fire the textfile metrics producer every 5 minutes. Image/log sizes change
+# slowly, so 5m is plenty and keeps the du walks off the 2-core node's back.
+[Unit]
+Description=Run fleet observability textfile metrics every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=observability-metrics.service
+
+[Install]
+WantedBy=timers.target

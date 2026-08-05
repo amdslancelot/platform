@@ -2,8 +2,9 @@
 #
 # INGRESS ONLY in this pass. Postgres egress is deliberately left unrestricted:
 # it is the shared dependency for three apps, so a mistake there has the largest
-# blast radius. Restricting it is worth doing as a separate change — see
-# cluster/networkpolicies/README.md.
+# blast radius. Restricting it is worth doing as a separate change — tracked as
+# B-9 in docs/security-posture-audit-remediation-plan.md §0; target rule is
+# egress DNS only. See also cluster/networkpolicies/README.md.
 #
 # 這一輪只管 ingress。刻意不限制 Postgres 的 egress:它是三個 app 的共用依賴,
 # 在那裡出錯影響半徑最大,值得獨立成一次可單獨驗證的變更。
@@ -39,6 +40,11 @@ spec:
             matchLabels: { kubernetes.io/metadata.name: gelp }
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: transigen }
+        # postgres-exporter 在 observability namespace,以 pod IP 連 5432。
+        # 它用的是 pg_monitor role(見 cluster/observability/provision-monitoring-role.sh),
+        # 讀得到統計視圖、讀不到 app 資料 —— 放行的是「同一個埠、更小的權限」。
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: observability }
         # 節點本身:`kubectl port-forward` 是由節點對 pod 建立連線,留著才能做維運除錯。
         # 這不算放寬:任何能在節點上開 port-forward 的人,本來就能 `kubectl exec` 進去。
         - ipBlock: { cidr: 10.0.0.240/32 }
