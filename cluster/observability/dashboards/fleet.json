@@ -1,12 +1,18 @@
 {
   "title": "Fleet — lans-h.cc",
   "uid": "lansh-fleet",
-  "tags": ["platform", "observability"],
+  "tags": [
+    "platform",
+    "observability"
+  ],
   "timezone": "browser",
   "editable": true,
   "schemaVersion": 39,
   "refresh": "1m",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -21,7 +27,10 @@
         "name": "cluster",
         "label": "Cluster",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "query": "label_values(up, cluster)",
         "refresh": 1,
         "includeAll": true,
@@ -35,7 +44,12 @@
     {
       "type": "row",
       "title": "Fleet overview / 機隊總覽",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -43,19 +57,36 @@
       "type": "stat",
       "title": "Scrape targets — 0 means the collector cannot reach it",
       "description": "up{} per job. A target at 0 is a collection failure, not necessarily a dead workload.\n\nup{} 每個 job 一列。顯示 0 代表採集不到,不一定是該 workload 掛了。",
-      "gridPos": { "h": 5, "w": 9, "x": 0, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "up{cluster=~\"$cluster\"}",
           "legendFormat": "{{job}} {{namespace}}",
           "instant": true
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none",
@@ -64,14 +95,38 @@
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red", "index": 0 } } },
-            { "type": "value", "options": { "1": { "text": "UP", "color": "green", "index": 1 } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         },
@@ -82,18 +137,35 @@
       "type": "stat",
       "title": "Fleet CPU (cores)",
       "description": "Sum of real containers only — container!=\"\" excludes the pod-level cgroup and container!=\"POD\" the pause container, which would otherwise double-count.\n\n只加總真正的 container:container!=\"\" 排除 pod 層級 cgroup、container!=\"POD\" 排除 pause container,否則會重複計算。",
-      "gridPos": { "h": 5, "w": 5, "x": 9, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 9,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(container_cpu_usage_seconds_total{cluster=~\"$cluster\", container!=\"\", container!=\"POD\"}[5m]))",
           "legendFormat": "cores"
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "colorMode": "value",
         "graphMode": "area"
       },
@@ -104,9 +176,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1.2 },
-              { "color": "red", "value": 1.7 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1.2
+              },
+              {
+                "color": "red",
+                "value": 1.7
+              }
             ]
           }
         },
@@ -117,18 +198,35 @@
       "type": "stat",
       "title": "Host memory available",
       "description": "node_memory_MemAvailable_bytes — the host figure, not the sum of containers. They never match: kernel, page cache, k3s and containerd live outside every container.\n\n主機數字,不是容器加總。兩者永遠對不起來 —— kernel、page cache、k3s、containerd 都不在任何容器裡。",
-      "gridPos": { "h": 5, "w": 5, "x": 14, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "node_memory_MemAvailable_bytes{cluster=~\"$cluster\"}",
           "legendFormat": "{{instance}}"
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "colorMode": "value",
         "graphMode": "area"
       },
@@ -138,9 +236,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 1500000000 },
-              { "color": "green", "value": 3000000000 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1500000000
+              },
+              {
+                "color": "green",
+                "value": 3000000000
+              }
             ]
           }
         },
@@ -151,18 +258,35 @@
       "type": "stat",
       "title": "Load (1m)",
       "description": "2 OCPU, so sustained load1 above ~2 means the run queue is backing up.\n\n2 OCPU,所以 load1 持續高於約 2 代表 run queue 開始堆積。",
-      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "node_load1{cluster=~\"$cluster\"}",
           "legendFormat": "{{instance}}"
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "colorMode": "value",
         "graphMode": "area"
       },
@@ -173,20 +297,33 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 2 },
-              { "color": "red", "value": 4 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 4
+              }
             ]
           }
         },
         "overrides": []
       }
     },
-
     {
       "type": "row",
       "title": "Per-app / 各 app",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
       "collapsed": false,
       "panels": []
     },
@@ -194,12 +331,23 @@
       "type": "timeseries",
       "title": "CPU by namespace (cores)",
       "description": "namespace == app, because every app has its own. No per-app instrumentation needed.\n\nnamespace 就是 app —— 每個 app 各有自己的 namespace,所以不需要額外埋點。",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{cluster=~\"$cluster\", container!=\"\", container!=\"POD\"}[5m]))",
           "legendFormat": "{{namespace}}"
         }
@@ -208,25 +356,50 @@
         "defaults": {
           "unit": "short",
           "decimals": 4,
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "type": "timeseries",
       "title": "Memory by namespace (working set)",
       "description": "observability is expected to be the largest here — see README and pending.md 2.8. That is a known open item, not a misreading.\n\nobservability 目前預期是最大的一條 —— 見 README 與 pending.md 2.8。那是已知的未結案項目,不是看錯。",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (namespace) (container_memory_working_set_bytes{cluster=~\"$cluster\", container!=\"\", container!=\"POD\"})",
           "legendFormat": "{{namespace}}"
         }
@@ -234,59 +407,193 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
-
     {
       "type": "row",
       "title": "Disk / 磁碟",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "collapsed": false,
       "panels": []
     },
     {
       "type": "timeseries",
-      "title": "Filesystem available — ALL THREE mountpoints",
-      "description": "/var/lib/rancher (containerd) and /var/lib/containers (podman) are on their own volumes since docs/runbook-storage.md. Either filling up is INVISIBLE in / — watching / alone would stay green through a full image store.\n\n這兩個目錄已經拆成獨立卷,其中任一塞爆在 / 上完全看不出來。只看 / 的告警會在 image store 爆滿時一路顯示正常。",
-      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 17 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "title": "Filesystem used % — ALL THREE mountpoints",
+      "description": "used / total, as 1 - (avail / size). `avail` excludes the root-reserved blocks, so this reads slightly fuller than df's own percentage — the conservative direction for something you alert on.\n\n/var/lib/rancher (containerd) and /var/lib/containers (podman) are on their own volumes since docs/runbook-storage.md. Either filling up is INVISIBLE in / — watching / alone would stay green through a full image store.\n\n已使用 / 總量,算法是 1 - (avail / size)。avail 不含 root 保留區塊,所以這個數字比 df 顯示的百分比略高一點 —— 對要拿來告警的東西而言,偏保守的方向是對的。\n\n那兩個目錄已拆成獨立卷,其中任一塞爆在 / 上完全看不出來。只看 / 的告警會在 image store 爆滿時一路顯示正常。",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "1 - (node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"} / node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"})",
           "legendFormat": "{{mountpoint}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Filesystem used / total (bytes)",
+      "description": "The same three mountpoints in absolute bytes, because a percentage hides scale: 85% of the 200 GB boot volume and 85% of a small image volume are very different amounts of work to fix.\n\n同樣三個掛載點的絕對位元組數。百分比會藏住尺度:200 GB 開機卷的 85% 和一顆小卷的 85%,要處理的工作量差很多。",
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"} - node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"}",
+          "legendFormat": "{{mountpoint}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "Image store on disk — should be a SAWTOOTH",
       "description": "prune-images.timer runs daily at 03:00 and prunes both stores. A daily drop then regrowth as deploys land is healthy. A FLAT LINE means the timer is not firing — that is what this metric exists to catch.\n\nprune-images.timer 每日 03:00 清兩個 store。每日下降、隨部署回升是正常的。一條平線代表 timer 沒在跑 —— 這正是這個指標存在的意義。",
-      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 17 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "image_store_disk_bytes{cluster=~\"$cluster\"}",
           "legendFormat": "{{store}}"
         }
@@ -294,25 +601,50 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "type": "timeseries",
       "title": "Pod container logs, total",
       "description": "Written by the host systemd timer into node-exporter's textfile collector — NOT a Kubernetes metric. If this flatlines while deploys continue, the timer stopped.\n\n由 host 上的 systemd timer 寫進 node-exporter 的 textfile collector,不是 Kubernetes 指標。若持續部署但這條變平,就是 timer 停了。",
-      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 17 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "pod_log_total_bytes{cluster=~\"$cluster\"}",
           "legendFormat": "total"
         }
@@ -320,20 +652,37 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"] },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       }
     },
-
     {
       "type": "row",
       "title": "Postgres (shared, db-per-app)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "collapsed": false,
       "panels": []
     },
@@ -341,12 +690,23 @@
       "type": "timeseries",
       "title": "Database size per app",
       "description": "db-per-app, so datname IS the app. This data sits on a single local-path PVC with no redundancy and no backup — see pending.md 3.4.\n\ndb-per-app,所以 datname 就是 app。這些資料放在唯一一顆沒有備援、沒有備份的 local-path PVC 上 —— 見 pending.md 3.4。",
-      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "pg_database_size_bytes{cluster=~\"$cluster\"}",
           "legendFormat": "{{datname}}"
         }
@@ -354,25 +714,49 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "type": "timeseries",
       "title": "Connections per database",
       "description": "Against Postgres's max_connections. Apps exhausting the pool shows up here before it shows up as an app error.\n\n對照 Postgres 的 max_connections。app 把連線池用光,會先在這裡看到,才會變成 app 的錯誤。",
-      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "pg_stat_database_numbackends{cluster=~\"$cluster\", datname!=\"\"}",
           "legendFormat": "{{datname}}"
         }
@@ -380,25 +764,50 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "type": "timeseries",
       "title": "Cache hit ratio",
       "description": "blks_hit / (blks_hit + blks_read). Below ~0.95 sustained means Postgres is going to disk more than it should — on a 12 GB node shared with everything else, that is a memory-pressure symptom.\n\n持續低於約 0.95 代表 Postgres 比應該的更常讀磁碟 —— 在一台 12 GB 且要分給所有東西的節點上,那是記憶體壓力的徵兆。",
-      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (datname) (rate(pg_stat_database_blks_hit{cluster=~\"$cluster\", datname!=\"\"}[5m])) / clamp_min(sum by (datname) (rate(pg_stat_database_blks_hit{cluster=~\"$cluster\", datname!=\"\"}[5m]) + rate(pg_stat_database_blks_read{cluster=~\"$cluster\", datname!=\"\"}[5m])), 1)",
           "legendFormat": "{{datname}}"
         }
@@ -408,20 +817,37 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
-          "custom": { "fillOpacity": 0, "lineWidth": 1, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
-
     {
       "type": "row",
       "title": "Storage, certificates, and the collector itself / 儲存、憑證、採集器自身",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
       "collapsed": false,
       "panels": []
     },
@@ -429,12 +855,23 @@
       "type": "timeseries",
       "title": "PVC used — the Postgres volume",
       "description": "There is exactly one PVC on this cluster and it holds the shared Postgres. local-path, single node, no redundancy, no backup. This panel is the only view of it filling up.\n\n整個叢集只有一顆 PVC,裝的是共用 Postgres。local-path、單節點、沒有備援、沒有備份。這個 panel 是唯一看得到它填滿的地方。",
-      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 37 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "1 - (kubelet_volume_stats_available_bytes{cluster=~\"$cluster\"} / kubelet_volume_stats_capacity_bytes{cluster=~\"$cluster\"})",
           "legendFormat": "{{persistentvolumeclaim}}"
         }
@@ -444,40 +881,80 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 0.75 },
-              { "color": "red", "value": 0.85 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "type": "stat",
       "title": "Certificate expiry (days)",
       "description": "cert-manager's own metric, scraped because cert-manager ships with the prometheus.io/scrape annotation. The one that matters is the *.lans-h.cc wildcard — it is Traefik's default cert, so every app Ingress depends on it.\n\ncert-manager 自己的指標。真正要緊的是 *.lans-h.cc wildcard —— 它是 Traefik 的預設憑證,每個 app 的 Ingress 都靠它。",
-      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 37 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "(certmanager_certificate_expiration_timestamp_seconds{cluster=~\"$cluster\"} - time()) / 86400",
           "legendFormat": "{{name}}",
           "instant": true
         }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name",
         "colorMode": "background",
         "graphMode": "none"
@@ -489,9 +966,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 14 },
-              { "color": "green", "value": 30 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 14
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
             ]
           }
         },
@@ -502,12 +988,23 @@
       "type": "timeseries",
       "title": "Collector memory vs its 400Mi limit",
       "description": "Alloy's GOMEMLIMIT is derived from this limit (~90% of it), so the limit is not a number to lower casually — cutting it on a process near the ceiling buys an OOMKill, and an OOMKilled collector looks like a metrics gap, not an outage. Tracking item: pending.md 2.8.\n\nAlloy 的 GOMEMLIMIT 由這個 limit 推導(約 90%),所以不能隨手調低 —— 對逼近上限的行程收緊,換來的是 OOMKill,而被 OOMKill 的採集器看起來像「指標有缺口」不像「掛了」。追蹤:pending.md 2.8。",
-      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 37 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (pod) (container_memory_working_set_bytes{cluster=~\"$cluster\", namespace=\"observability\", container!=\"\", container!=\"POD\"})",
           "legendFormat": "{{pod}}"
         }
@@ -515,21 +1012,44 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "custom": { "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 314572800 },
-              { "color": "red", "value": 377487360 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 314572800
+              },
+              {
+                "color": "red",
+                "value": 377487360
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     }
   ]
