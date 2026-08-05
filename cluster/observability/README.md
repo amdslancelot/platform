@@ -109,3 +109,38 @@ NOT fix: **containerd log rotation** and **periodic image prune**.
 
 *部署順序見 `runbook.md`,以及光靠監控解決不了、必須另外做的兩件事:
 **containerd log 輪替** 與 **定期 image prune**。*
+
+## Dashboard / 儀表板
+
+`dashboards/fleet.json` — the fleet dashboard, kept in git rather than only in a
+Grafana account. Import it with **Dashboards → New → Import → Upload JSON**, then
+pick the Prometheus datasource when prompted.
+
+*`dashboards/fleet.json` —— 機隊儀表板,存在 git 裡而不是只存在 Grafana 帳號裡。
+匯入方式:**Dashboards → New → Import → Upload JSON**,系統詢問時選 Prometheus
+datasource。*
+
+It has a `cluster` variable driven by `label_values(up, cluster)`, so a second
+cluster (§4.5 in `pending.md`) appears in the picker without editing anything.
+
+*它有一個由 `label_values(up, cluster)` 驅動的 `cluster` 變數,所以之後若有第二個
+cluster(見 `pending.md` §4.5),不用改任何東西就會出現在選單裡。*
+
+Do **not** import the community Kubernetes dashboards. Almost all of them depend
+on **kube-state-metrics**, which this stack does not run — every panel would read
+"No data" and look like a collection failure. kube-state-metrics reports cluster
+*object* state (desired vs available replicas, restart counts); cAdvisor reports
+resource *usage*. Different things; adding the former is a separate decision with
+its own memory and active-series cost.
+
+*請**不要**匯入社群的 Kubernetes 儀表板。它們幾乎全部依賴 **kube-state-metrics**,
+而本 stack 沒有跑它 —— 每個 panel 都會顯示 "No data",看起來像採集壞掉。
+kube-state-metrics 報告的是叢集**物件**狀態(期望與實際 replica 數、重啟次數),
+cAdvisor 報告的是資源**用量**,兩者不同;要不要加前者是另一個決定,有它自己的記憶體與
+active series 成本。*
+
+`1860` (Node Exporter Full) does work as-is if a deeper host view is wanted — it
+reads only node-exporter, which this stack does run.
+
+*若想要更深入的主機視圖,社群的 `1860`(Node Exporter Full)可以直接用 —— 它只讀
+node-exporter,而本 stack 有跑。*
