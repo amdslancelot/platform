@@ -558,13 +558,127 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "CPU share of host CPU IN USE — triage view",
+      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nStacked: the gap between the stack top and 100% is everything outside a container — the kernel and host processes.\n\n堆疊顯示:堆疊頂端到 100% 的那段,就是容器以外的東西(kernel 與 host 行程)。",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{cluster=~\"$cluster\", container!=\"\", container!=\"POD\"}[5m]))\n  / scalar(sum(rate(node_cpu_seconds_total{cluster=~\"$cluster\", mode!=\"idle\"}[5m])))",
+          "legendFormat": "{{namespace}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "fillOpacity": 18,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory share of host memory IN USE — triage view",
+      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nStacked: the gap to 100% is the kernel, the page cache, and every host process outside a container — on this node that gap is about two thirds.\n\n堆疊顯示:到 100% 的那段是 kernel、page cache 與所有容器外的 host 行程 —— 這台機器上那段大約是三分之二。",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (namespace) (container_memory_working_set_bytes{cluster=~\"$cluster\", container!=\"\", container!=\"POD\"})\n  / scalar(node_memory_MemTotal_bytes{cluster=~\"$cluster\"} - node_memory_MemAvailable_bytes{cluster=~\"$cluster\"})",
+          "legendFormat": "{{namespace}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "decimals": 1,
+          "custom": {
+            "fillOpacity": 18,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Disk / 磁碟",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "collapsed": false,
       "panels": []
@@ -577,7 +691,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -651,7 +765,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -800,7 +914,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -883,7 +997,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -1011,7 +1125,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       },
       "collapsed": false,
       "panels": []
@@ -1024,7 +1138,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -1074,7 +1188,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -1164,7 +1278,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -1215,7 +1329,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 59
       },
       "collapsed": false,
       "panels": []
@@ -1228,7 +1342,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1298,7 +1412,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1361,7 +1475,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",

@@ -108,6 +108,20 @@ DB_LABELS='{
   "transigen": "Transigen"
 }'
 
+# Mountpoints are renamed, not published. `/var/lib/rancher` is absent from the
+# public topology and its path names the orchestrator; `containerd` and `podman`
+# are already public there, so the TOOL may be named while the PATH may not.
+# Same allowlist rule: an unlisted mountpoint is dropped, so a volume added later
+# does not appear here by accident.
+# mountpoint 是改名後才發布,不是原樣發布。`/var/lib/rancher` 這個路徑會透露
+# orchestrator,公開版 topology 裡沒有它;而 `containerd`、`podman` 在那份文件裡
+# 已經是公開的 —— 所以工具名可以講,路徑不行。
+MP_LABELS='{
+  "/":                    "System volume",
+  "/var/lib/rancher":     "containerd volume",
+  "/var/lib/containers":  "podman volume"
+}'
+
 C="cluster=\"${CLUSTER}\""
 # cAdvisor emits a series for the pod cgroup (container="") and for the pause
 # container (container="POD") as well as for each real container. Summing without
@@ -172,6 +186,27 @@ pg_cache="$(scalar "sum(${PGH}) / clamp_min(sum(${PGH}) + sum(${PGR}), 1)")"
 vector "pg_database_size_bytes{${C}, datname!=\"\", datname!~\"postgres|template.*\"}" \
   datname > "$work/db.json"
 
+# All three volumes as used-fraction. The node has three since
+# docs/runbook-storage.md split the image stores off; either of those filling up
+# is invisible in `/`, which is the exact failure the split was made to expose.
+# Ratios only — sizes never leave this script.
+MPS='mountpoint=~"/|/var/lib/rancher|/var/lib/containers"'
+vector "1 - (node_filesystem_avail_bytes{${C}, ${MPS}} / node_filesystem_size_bytes{${C}, ${MPS}})" \
+  mountpoint > "$work/fs.json"
+
+# How much of each volume its image store accounts for. Two separate scalars
+# rather than one query: the store label and the mountpoint label do not match,
+# so there is no shared label set to join on without label_replace, and with
+# exactly two pairs the explicit form is clearer than the clever one.
+#
+# The containerd figure measures the CONTENT store only, not everything
+# containerd keeps on that volume — it is a LOWER BOUND. podman's covers its
+# whole storage root. Noted because the two numbers are not equivalent readings.
+img_containerd="$(scalar \
+  "image_store_disk_bytes{${C}, store=\"containerd\"} / on(instance) group_left() node_filesystem_size_bytes{${C}, mountpoint=\"/var/lib/rancher\"}")"
+img_podman="$(scalar \
+  "image_store_disk_bytes{${C}, store=\"podman\"} / on(instance) group_left() node_filesystem_size_bytes{${C}, mountpoint=\"/var/lib/containers\"}")"
+
 vector "sum by (namespace) (container_memory_working_set_bytes{${CADV}})" namespace > "$work/mem.json"
 vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m]))" namespace > "$work/cpu.json"
 
@@ -183,8 +218,12 @@ jq -n \
   --slurpfile mem "$work/mem.json" \
   --slurpfile cpu "$work/cpu.json" \
   --slurpfile db "$work/db.json" \
+  --slurpfile fs "$work/fs.json" \
   --argjson labels "$NS_LABELS" \
   --argjson dblabels "$DB_LABELS" \
+  --argjson mplabels "$MP_LABELS" \
+  --argjson img_containerd "$img_containerd" \
+  --argjson img_podman "$img_podman" \
   --argjson stale "$STALE_AFTER_SECONDS" \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson cpu_cores "$cpu_cores" \
@@ -242,6 +281,24 @@ jq -n \
       load1_per_core:   (($load1 / $cpu_cores) | r2)
     },
     services: { up: $svc_up, total: $svc_total },
+    storage: {
+      # Volumes carry a renamed label and a used-fraction. No capacity, no bytes.
+      volumes: (
+        ($fs[0] // [])
+        | map(select($mplabels[.key] != null))
+        | map({ name: $mplabels[.key], used_ratio: (.value | r4) })
+        | sort_by(-.used_ratio)),
+      # Each image store as a fraction of the volume it lives on. null rather
+      # than 0 when the textfile metric is missing — the timer that writes it can
+      # stop independently of everything else here, and a 0% image store would
+      # look like a freshly pruned node instead of a broken collector.
+      image_stores: [
+        { name: "containerd images", of_volume:
+            (if $img_containerd == null then null else ($img_containerd | r4) end) },
+        { name: "podman images", of_volume:
+            (if $img_podman == null then null else ($img_podman | r4) end) }
+      ]
+    },
     # null when the exporter has no answer, so the page can show "—" rather than
     # invent a zero. r4 because this sits at ~0.99x and 2 places would flatten
     # every real change into "99%".
@@ -258,30 +315,34 @@ jq -n \
             | sort_by(-.share)
           end)
     },
-    # Shares, not absolute values, for BOTH memory and CPU.
+    # Ratios, never absolute values. An absolute per-workload core figure would
+    # have reopened what removing the core count closed: sum the workloads,
+    # divide by cpu_used_ratio, and the core count falls out. A core count
+    # divided by the core count does not — it is a ratio, and ratios of ratios
+    # stay ratios.
     #
-    # An absolute per-workload core figure would have reopened what removing the
-    # core count just closed: summing the workloads and dividing by
-    # cpu_used_ratio recovers the core count. Ratios divided by ratios stay
-    # ratios, so nothing here reconstructs the machine.
+    # BOTH columns are now fractions of the whole machine, so they can be read
+    # against the tiles at the top without a conversion in the reader head:
+    # workload memory sums to roughly mem_used_ratio minus the non-container
+    # part, workload CPU to roughly cpu_used_ratio minus the same.
     #
-    # NOTE the denominators are what is IN USE, not the totals — so neither
-    # column sums to 1. The rest is the kernel, the page cache, and every host
-    # process outside a container.
+    # The earlier version used "of the memory in use" for memory and "of the
+    # machine" for CPU. Both were individually defensible and side by side they
+    # were a trap — 12.2% next to 0.36% invites the reading that this workload
+    # uses thirty times more memory than CPU, when the two numbers were not on
+    # the same scale at all.
     #
-    # 記憶體和 CPU 都用佔比而非絕對值。留著 per-workload 的絕對核心數,等於把剛剛
-    # 拿掉 core 數關上的門再打開:把各 workload 加總再除以 cpu_used_ratio 就還原了。
-    # 注意分母是「使用中」的量而不是總量,所以兩欄都不會加總到 1。
+    # 兩欄現在都是「佔整台機器」的比例,可以直接跟上面的 tiles 對讀,不需要在腦中換算。
+    # 先前記憶體用「使用中」、CPU 用「整台機器」,各自都說得通,但並排就是陷阱:
+    # 12.2% 旁邊放 0.36%,會讓人以為這個 workload 吃的記憶體是 CPU 的三十倍,
+    # 而那兩個數字根本不在同一個尺度上。
     workloads: (
-      (($cpu_ratio * $cpu_cores) as $cpu_in_use
-       | $m
-       | map(select($labels[.key] != null))
-       | map({ name:      $labels[.key],
-               mem_share: ((.value / ($mem_total - $mem_avail)) | r4),
-               cpu_share: (if $cpu_in_use > 0
-                           then ((($cpumap[.key] // 0) / $cpu_in_use) | r4)
-                           else 0 end) })
-       | sort_by(-.mem_share))
+      $m
+      | map(select($labels[.key] != null))
+      | map({ name:            $labels[.key],
+              mem_of_capacity: ((.value / $mem_total) | r4),
+              cpu_of_capacity: ((($cpumap[.key] // 0) / $cpu_cores) | r4) })
+      | sort_by(-.mem_of_capacity)
     )
   }' > "$work/metrics.json"
 
