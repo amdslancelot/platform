@@ -644,9 +644,9 @@
       }
     },
     {
-      "type": "bargauge",
-      "title": "Filesystem used / total (bytes)",
-      "description": "The same three mountpoints in absolute bytes, because a percentage hides scale: 85% of the 200 GB boot volume and 85% of a small image volume are very different amounts of work to fix.\n\n同樣三個掛載點的絕對位元組數。百分比會藏住尺度:200 GB 開機卷的 85% 和一顆小卷的 85%,要處理的工作量差很多。",
+      "type": "table",
+      "title": "Filesystem used / total — per mountpoint",
+      "description": "Each mountpoint's own used / total, as absolute bytes plus its own percentage.\n\nA bar gauge could not express this: the three volumes have different capacities, so there is no single `max` that is correct for all of them — the old panel drew USED with no denominator at all, which is exactly the reading that hides a small volume filling up.\n\nBuilt from three instant queries joined on `mountpoint`. Each uses `sum by (mountpoint)` so the joined frames carry no other label columns; the consequence is that this panel ASSUMES ONE NODE per selected cluster — with two nodes their filesystems would be summed together rather than listed separately.\n\n`avail` excludes the root-reserved blocks, so the percentage reads slightly fuller than df's own — the conservative direction for something you alert on.\n\n每個掛載點各自的 used / total,絕對位元組加上各自的百分比。\n\nbar gauge 表達不了這件事:三個卷容量不同,沒有一個對三者都正確的 `max` —— 舊 panel 只畫 used、完全沒有分母,而那正是「小卷快滿了」會被藏住的讀法。\n\n由三條 instant query 以 `mountpoint` join 而成。每條都用 `sum by (mountpoint)`,所以 join 後不會帶進其他 label 欄位;代價是這個 panel **假設每個選定的 cluster 只有一個節點** —— 有兩個節點時,它們的檔案系統會被加在一起而不是分別列出。\n\navail 不含 root 保留區塊,所以百分比比 df 顯示的略高 —— 對要拿來告警的東西,偏保守是對的。",
       "gridPos": {
         "h": 9,
         "w": 8,
@@ -664,40 +664,168 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"} - node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"}",
-          "legendFormat": "{{mountpoint}}",
+          "expr": "sum by (mountpoint) (node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"} - node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (mountpoint) (node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"})",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "1 - (sum by (mountpoint) (node_filesystem_avail_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"}) / sum by (mountpoint) (node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=~\"/|/var/lib/rancher|/var/lib/containers\"}))",
+          "format": "table",
           "instant": true
         }
       ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "mountpoint",
+            "mode": "outer"
+          }
         },
-        "displayMode": "gradient",
-        "orientation": "horizontal",
-        "showUnfilled": true,
-        "minVizWidth": 8,
-        "minVizHeight": 16
-      },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true
+            },
+            "renameByName": {
+              "mountpoint": "Mountpoint",
+              "Value #A": "Used",
+              "Value #B": "Total",
+              "Value #C": "Used %"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
               {
-                "color": "green",
-                "value": null
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.75
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.85
+                    }
+                  ]
+                }
               }
             ]
           }
-        },
-        "overrides": []
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Used %",
+            "desc": true
+          }
+        ],
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
       }
     },
     {
