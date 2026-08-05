@@ -1017,9 +1017,9 @@
       "panels": []
     },
     {
-      "type": "piechart",
-      "title": "Database share per app (% of total)",
-      "description": "Relative share of the shared Postgres, per app. db-per-app, so datname IS the app.\n\nPROPORTION ONLY — the slices are labelled with percentages and the absolute bytes are deliberately not on the chart. A pie is the wrong shape for tracking an absolute number anyway: it cannot show growth, only redistribution. If every database doubled overnight this chart would not move.\n\nSo this panel answers 'who holds the data', not 'how much data is there' and not 'is it growing'. For the absolute figure query pg_database_size_bytes directly; for growth, that metric over time.\n\nThis data sits on a single local-path PVC with no redundancy and no backup — pending.md §3.4.\n\n各 app 在共用 Postgres 裡的**佔比**。db-per-app,所以 datname 就是 app。\n\n**只給比例** —— 切片標的是百分比,絕對位元組刻意不放上去。而且圓餅本來就不適合追絕對值:它只能表現「重新分配」,表現不了「成長」。所有 database 一夜之間全部翻倍,這張圖不會動。\n\n所以這個 panel 回答的是「資料在誰手上」,不是「有多少資料」,也不是「有沒有在長」。要絕對值直接查 pg_database_size_bytes;要成長就看它隨時間的變化。\n\n這些資料放在唯一一顆沒有備援、沒有備份的 local-path PVC 上 —— pending.md §3.4。",
+      "type": "timeseries",
+      "title": "Database size per app",
+      "description": "db-per-app, so datname IS the app. This data sits on a single local-path PVC with no redundancy and no backup — see pending.md 3.4.\n\ndb-per-app,所以 datname 就是 app。這些資料放在唯一一顆沒有備援、沒有備份的 local-path PVC 上 —— 見 pending.md 3.4。",
       "gridPos": {
         "h": 9,
         "w": 8,
@@ -1037,51 +1037,33 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "pg_database_size_bytes{cluster=~\"$cluster\", datname!=\"\", datname!~\"postgres|template.*\"}",
-          "legendFormat": "{{datname}}",
-          "instant": true
+          "expr": "pg_database_size_bytes{cluster=~\"$cluster\"}",
+          "legendFormat": "{{datname}}"
         }
       ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "pieType": "donut",
-        "displayLabels": [
-          "percent"
-        ],
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "values": [
-            "percent"
-          ]
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "decimals": 1,
           "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
-          "color": {
-            "mode": "palette-classic"
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
           }
         },
         "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
