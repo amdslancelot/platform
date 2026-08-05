@@ -97,6 +97,17 @@ NS_LABELS='{
   "kube-system":  "Ingress & platform"
 }'
 
+# The same allowlist discipline for database names. A database provisioned later
+# is absent from this map and is therefore dropped — it does not appear on the
+# public chart merely because someone ran provision-db.sh.
+# 同樣的白名單紀律用在 database 名稱上:之後新增的 database 不在表上就會被丟掉,
+# 不會因為有人跑了 provision-db.sh 就自動出現在公開圖上。
+DB_LABELS='{
+  "snoopy":    "Snoopy",
+  "gelp":      "Gelp",
+  "transigen": "Transigen"
+}'
+
 C="cluster=\"${CLUSTER}\""
 # cAdvisor emits a series for the pod cgroup (container="") and for the pause
 # container (container="POD") as well as for each real container. Summing without
@@ -142,6 +153,25 @@ PGH="pg_stat_database_blks_hit{${C}, datname!=\"\"}"
 PGR="pg_stat_database_blks_read{${C}, datname!=\"\"}"
 pg_cache="$(scalar "sum(${PGH}) / clamp_min(sum(${PGH}) + sum(${PGR}), 1)")"
 
+# Per-database SHARE of the shared Postgres. Bytes are fetched here and thrown
+# away below — only the ratios reach the document.
+#
+# This narrows §5.3's rule rather than obeying it as first written. That rule
+# excluded `pg_database_size_bytes{datname=…}` outright. Shares are a weaker
+# disclosure than sizes: they say who holds proportionally more data, never how
+# much data exists, so the absolute volume — the figure that actually
+# characterises the system — stays unpublished. The database names themselves are
+# already public: topology.html shows Postgres serving these apps by name.
+# Decision recorded in pending.md §5.5.
+#
+# 各 database 在共用 Postgres 裡的**佔比**。bytes 在這裡取得,但下面就丟掉,只有比例
+# 進得了文件。這是把 §5.3 的規則收窄而不是照原文遵守:原文整條排除
+# pg_database_size_bytes{datname=…}。比例比大小弱 —— 它只說誰佔比較多,不說總共有多少,
+# 所以真正能刻畫這個系統的絕對量仍然沒有公開。database 名字本來就是公開的:
+# topology.html 已經指名 Postgres 服務這些 app。
+vector "pg_database_size_bytes{${C}, datname!=\"\", datname!~\"postgres|template.*\"}" \
+  datname > "$work/db.json"
+
 vector "sum by (namespace) (container_memory_working_set_bytes{${CADV}})" namespace > "$work/mem.json"
 vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m]))" namespace > "$work/cpu.json"
 
@@ -152,7 +182,9 @@ vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m])
 jq -n \
   --slurpfile mem "$work/mem.json" \
   --slurpfile cpu "$work/cpu.json" \
+  --slurpfile db "$work/db.json" \
   --argjson labels "$NS_LABELS" \
+  --argjson dblabels "$DB_LABELS" \
   --argjson stale "$STALE_AFTER_SECONDS" \
   --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson cpu_cores "$cpu_cores" \
@@ -176,37 +208,87 @@ jq -n \
   {
     generated_at: $generated_at,
     stale_after_seconds: $stale,
+    # RATIOS ONLY. The byte totals are queried above, used as denominators here,
+    # and never written out.
+    #
+    # This has to happen in the PRODUCER, not in the page. data.json is served at
+    # a public URL — anything left in it is published whether or not a panel
+    # renders it, and "the page does not show it" is not a control.
+    #
+    # Removing the node totals alone would not have worked either. With
+    # `mem_used_bytes` and a per-workload share, in-use memory is recoverable by
+    # division, and with the used ratio the node total falls out of that. The
+    # absolute figures had to go as a set, which is why workloads carry a share
+    # below and not a byte count.
+    #
+    # 只給比例。位元組總量只在上面當分母,不寫進輸出。這必須做在**產生端**:
+    # data.json 是公開 URL,留在裡面的東西不管畫面有沒有畫都已經公開,
+    # 「頁面沒顯示」不是一種控制。只拿掉節點總量也不夠 —— 有 mem_used_bytes
+    # 和一個 per-workload 佔比就能除回 in-use,再配上 used ratio 就能還原節點總量。
+    #
+    # The core COUNT is gone for the same reason. load1_per_core survives it
+    # because dividing by the count destroys it: 0.09 per core is the same
+    # reading on 2 cores or on 64, which is exactly why load is normalised that
+    # way in the first place.
+    # core 數也一併拿掉。load1_per_core 留得下來,是因為除以核心數就把核心數消掉了:
+    # 0.09 per core 在 2 核和 64 核上是同一個讀數。
     node: {
-      cpu_cores:        $cpu_cores,
-      mem_total_bytes:  $mem_total,
-      disk_total_bytes: $disk_total,
       uptime_seconds:   ($uptime_s | floor)
     },
     usage: {
       cpu_used_ratio:   ($cpu_ratio | r4),
-      mem_used_bytes:   ($mem_total - $mem_avail),
-      disk_used_bytes:  ($disk_total - $disk_avail),
+      mem_used_ratio:   ((($mem_total - $mem_avail) / $mem_total) | r4),
+      disk_used_ratio:  ((($disk_total - $disk_avail) / $disk_total) | r4),
       load1_per_core:   (($load1 / $cpu_cores) | r2)
     },
     services: { up: $svc_up, total: $svc_total },
     # null when the exporter has no answer, so the page can show "—" rather than
     # invent a zero. r4 because this sits at ~0.99x and 2 places would flatten
     # every real change into "99%".
-    postgres: { cache_hit_ratio: (if $pg_cache == null then null else ($pg_cache | r4) end) },
+    postgres: {
+      cache_hit_ratio: (if $pg_cache == null then null else ($pg_cache | r4) end),
+      # SHARES ONLY — the byte values are the denominator and are then discarded.
+      # Nothing downstream can recover an absolute size from this array.
+      databases: (
+        (($db[0] // []) | map(select($dblabels[.key] != null))) as $rows
+        | ($rows | map(.value) | add // 0) as $tot
+        | if $tot <= 0 then []
+          else $rows
+            | map({ name: $dblabels[.key], share: ((.value / $tot) | r4) })
+            | sort_by(-.share)
+          end)
+    },
+    # Shares, not absolute values, for BOTH memory and CPU.
+    #
+    # An absolute per-workload core figure would have reopened what removing the
+    # core count just closed: summing the workloads and dividing by
+    # cpu_used_ratio recovers the core count. Ratios divided by ratios stay
+    # ratios, so nothing here reconstructs the machine.
+    #
+    # NOTE the denominators are what is IN USE, not the totals — so neither
+    # column sums to 1. The rest is the kernel, the page cache, and every host
+    # process outside a container.
+    #
+    # 記憶體和 CPU 都用佔比而非絕對值。留著 per-workload 的絕對核心數,等於把剛剛
+    # 拿掉 core 數關上的門再打開:把各 workload 加總再除以 cpu_used_ratio 就還原了。
+    # 注意分母是「使用中」的量而不是總量,所以兩欄都不會加總到 1。
     workloads: (
-      $m
-      | map(select($labels[.key] != null))
-      | map({ name:      $labels[.key],
-              mem_bytes: (.value | round),
-              cpu_cores: (($cpumap[.key] // 0) | r3) })
-      | sort_by(-.mem_bytes)
+      (($cpu_ratio * $cpu_cores) as $cpu_in_use
+       | $m
+       | map(select($labels[.key] != null))
+       | map({ name:      $labels[.key],
+               mem_share: ((.value / ($mem_total - $mem_avail)) | r4),
+               cpu_share: (if $cpu_in_use > 0
+                           then ((($cpumap[.key] // 0) / $cpu_in_use) | r4)
+                           else 0 end) })
+       | sort_by(-.mem_share))
     )
   }' > "$work/metrics.json"
 
 # Refuse to publish an obviously broken snapshot. Overwriting a good ConfigMap
 # with nulls would make the public page lie; keeping the previous one is right.
 # 拒絕發布明顯壞掉的快照 —— 用 null 蓋掉好資料會讓公開頁說謊,保留上一份才對。
-if ! jq -e '.node.cpu_cores > 0 and (.workloads | length) > 0' "$work/metrics.json" >/dev/null; then
+if ! jq -e '.usage.mem_used_ratio > 0 and (.workloads | length) > 0' "$work/metrics.json" >/dev/null; then
   echo "ERROR: snapshot failed sanity check, keeping the previous ConfigMap:" >&2
   cat "$work/metrics.json" >&2
   exit 1

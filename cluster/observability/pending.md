@@ -1238,18 +1238,56 @@ panel 從來沒問過的查詢。訪客繞不過去的白名單必須做在**產
 `scripts/public-metrics.sh` 裡的 `NS_LABELS` 會丟掉任何不在表上的 namespace,
 所以之後新增的 namespace 不會預設外洩。*
 
-**What is published**, exactly: node CPU/memory/disk as used-vs-total, load per
-core, uptime, a healthy-target *count*, and per-workload memory and CPU under
-display names. **What is not**: the node's IP and hostname, the `:9000` port, the
-string `k3s`, pod names, mountpoint paths, database names and sizes, and *which*
-target is unhealthy when one is. The last two are deliberate — `pg_database_size_bytes`
-is per-app business data, and naming the down target tells a stranger where to aim.
+**What is published** (revised 2026-08-04, second pass — see below): CPU, memory
+and disk as **ratios only**, load per core, uptime, a healthy-target *count*,
+per-workload memory and CPU **shares** under display names, the Postgres cache
+hit ratio, and each database's **share** of the shared Postgres. **What is not**:
+the node's IP and hostname, the `:9000` port, the string `k3s`, pod names,
+mountpoint paths, *which* target is unhealthy when one is, and — the whole point
+of the revision — **any absolute quantity at all**: no memory size, no disk size,
+no core count, no byte figure for any workload or database.
 
-***確切發布的內容**:節點 CPU/記憶體/磁碟的 used-vs-total、load per core、uptime、
-健康 target 的**數量**,以及各 workload 的記憶體與 CPU(用顯示名)。**不發布的**:
-節點 IP 與 hostname、`:9000`、字串 `k3s`、pod 名、mountpoint 路徑、資料庫名稱與大小,
-以及有 target 掛掉時**是哪一個**。最後兩項是刻意的 —— `pg_database_size_bytes` 是
-per-app 的業務資料,而指名掛掉的是哪個 target 等於告訴陌生人往哪打。*
+***確切發布的內容**(2026-08-04 第二次修訂,見下):CPU、記憶體、磁碟**只給比例**、
+load per core、uptime、健康 target 的**數量**、各 workload 的記憶體與 CPU **佔比**
+(用顯示名)、Postgres cache hit ratio,以及各 database 在共用 Postgres 裡的**佔比**。
+**不發布的**:節點 IP 與 hostname、`:9000`、字串 `k3s`、pod 名、mountpoint 路徑、
+有 target 掛掉時**是哪一個**,以及這次修訂的重點 —— **任何絕對量**:沒有記憶體大小、
+沒有磁碟大小、沒有核心數、任何 workload 或 database 都沒有位元組數字。*
+
+**Two revisions to §5.3's original line, both deliberate.**
+
+***對 §5.3 原始規則的兩處修訂,都是刻意的。***
+
+*Loosened:* §5.3 excluded `pg_database_size_bytes{datname=…}` outright. Per-app
+**shares** are published instead. A share says who holds proportionally more
+data; it never says how much data exists, and the absolute volume — the figure
+that actually characterises the system — stays unpublished. The database names
+themselves were never the secret: `topology.html` already shows Postgres serving
+these apps by name.
+
+***放寬:**§5.3 整條排除 `pg_database_size_bytes{datname=…}`,改為發布 per-app
+**佔比**。佔比只說誰佔得多,不說總共有多少;真正能刻畫這個系統的絕對量仍然沒有公開。
+database 名字本來就不是秘密 —— `topology.html` 已經指名 Postgres 服務這些 app。*
+
+*Tightened:* the first pass published node totals and per-workload byte counts.
+Those are gone, and the removal had to be **all of them at once** — that is the
+non-obvious part. Node totals alone were not enough: with a workload's byte count
+and its share, the memory in use divides out, and with the used ratio the node
+total falls out of that. The same arithmetic recovers the core count from an
+absolute per-workload CPU figure. **Ratios divided by ratios stay ratios**, which
+is why every field is now one.
+
+***收緊:**第一版發布了節點總量與各 workload 的位元組數,現在都拿掉了,而且必須**一次
+全部拿掉** —— 這是不直觀的地方。只拿掉節點總量沒有用:有某個 workload 的位元組數和它的
+佔比,就能除出「使用中的記憶體」,再配上 used ratio 就能還原節點總量;同樣的算術也能從
+per-workload 的絕對 CPU 值還原核心數。**比例除以比例仍然是比例**,所以現在每個欄位都是比例。*
+
+This is enforced in the **producer**, not the page. `data.json` is served at a
+public URL; anything left in it is published whether or not a panel renders it,
+so "the layout does not show it" is not a control.
+
+*這是在**產生端**強制的,不是在頁面。`data.json` 是公開 URL,留在裡面的東西不管畫面有沒有
+畫都已經公開,所以「版面沒顯示」不是一種控制。**
 
 **The one real concession:** the `metrics:read` token now lives on the node, in
 `/etc/observability/public-metrics.env` (0600 root). §0c's argument for a
