@@ -1317,6 +1317,19 @@ display feature would take `lans-h.cc` down.
 ConfigMap 不存在會讓網站 pod 卡在 `ContainerCreating`,一個附屬展示功能反而弄掉
 `lans-h.cc`。*
 
+**Live 2026-08-05.** The two things flagged as unverified when this was written
+both held on first contact with the real API: the query URL is the push base with
+`/push` replaced by `/api/v1/query` (i.e. `<stack>/api/prom` + the standard
+Prometheus paths), and `/var/log/pods` is on the root volume — `df -h /var/log/pods /`
+reports `/dev/mapper/ocivolume-root` for both. The redaction check in runbook §6b
+printed `clean`. First real snapshot: 8 workloads, 24h history, no absolute
+quantity anywhere in the document.
+
+***2026-08-05 上線。**當初標記為未驗證的兩件事,第一次接觸真實 API 就都成立:query URL
+是 push base 把 `/push` 換成 `/api/v1/query`,而 `/var/log/pods` 確實在根卷上。runbook
+§6b 的 redaction 檢查印出 `clean`。第一份真實快照:8 個 workload、24 小時歷史,文件裡
+沒有任何絕對量。*
+
 Still open: whether to link `fleet.html` from the homepage or leave it
 unlinked-but-public. Unlinked is not a security control (the URL is guessable and
 `canonical` is set), so this is a presentation choice, not a safety one.
