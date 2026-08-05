@@ -453,7 +453,7 @@
     {
       "type": "timeseries",
       "title": "CPU by namespace (cores)",
-      "description": "namespace == app, because every app has its own. No per-app instrumentation needed.\n\nnamespace 就是 app —— 每個 app 各有自己的 namespace,所以不需要額外埋點。",
+      "description": "namespace == app, because every app has its own. No per-app instrumentation needed.\n\nnamespace 就是 app —— 每個 app 各有自己的 namespace,所以不需要額外埋點。\n\nNOT STACKED, deliberately. Stacking was making this panel unreadable for the one thing it is for: on a stacked chart the series drawn at the TOP reaches the highest point on the y axis no matter how small it is — its own value is the THICKNESS of its band, not its height. A namespace using almost nothing looked like the biggest consumer. Unstacked, height means value and the ranking is the picture. The legend is sorted by last value for the same reason.\n\nWhat is lost: the composition view, where the top of the stack showed the total. That is the lesser question here — the totals are the tiles at the top of the dashboard.\n\n**刻意不堆疊。**堆疊讓這個 panel 在它唯一的用途上變得不可讀:堆疊圖裡畫在**最上層**的 series 會碰到 y 軸最高點,不管它多小 —— 它自己的值是那條帶子的**厚度**而不是高度。幾乎沒在用的 namespace 看起來會像最大的消費者。取消堆疊後,高度就是數值,ranking 就是整張圖在講的事。legend 也依最後一筆數值排序,理由相同。\n\n失去的是「組成」視角(堆疊頂端等於總量)。那在這裡是次要問題 —— 總量是 dashboard 最上面那排 tiles。",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -480,8 +480,8 @@
           "unit": "short",
           "decimals": 4,
           "custom": {
-            "fillOpacity": 10,
-            "lineWidth": 1,
+            "fillOpacity": 8,
+            "lineWidth": 2,
             "showPoints": "never"
           }
         },
@@ -494,7 +494,9 @@
           "calcs": [
             "lastNotNull",
             "max"
-          ]
+          ],
+          "sortBy": "Last *",
+          "sortDesc": true
         },
         "tooltip": {
           "mode": "multi",
@@ -505,7 +507,7 @@
     {
       "type": "timeseries",
       "title": "Memory by namespace (working set)",
-      "description": "observability is expected to be the largest here — see README and pending.md 2.8. That is a known open item, not a misreading.\n\nobservability 目前預期是最大的一條 —— 見 README 與 pending.md 2.8。那是已知的未結案項目,不是看錯。",
+      "description": "observability is expected to be the largest here — see README and pending.md 2.8. That is a known open item, not a misreading.\n\nobservability 目前預期是最大的一條 —— 見 README 與 pending.md 2.8。那是已知的未結案項目,不是看錯。\n\nNOT STACKED, deliberately. Stacking was making this panel unreadable for the one thing it is for: on a stacked chart the series drawn at the TOP reaches the highest point on the y axis no matter how small it is — its own value is the THICKNESS of its band, not its height. A namespace using almost nothing looked like the biggest consumer. Unstacked, height means value and the ranking is the picture. The legend is sorted by last value for the same reason.\n\nWhat is lost: the composition view, where the top of the stack showed the total. That is the lesser question here — the totals are the tiles at the top of the dashboard.\n\n**刻意不堆疊。**堆疊讓這個 panel 在它唯一的用途上變得不可讀:堆疊圖裡畫在**最上層**的 series 會碰到 y 軸最高點,不管它多小 —— 它自己的值是那條帶子的**厚度**而不是高度。幾乎沒在用的 namespace 看起來會像最大的消費者。取消堆疊後,高度就是數值,ranking 就是整張圖在講的事。legend 也依最後一筆數值排序,理由相同。\n\n失去的是「組成」視角(堆疊頂端等於總量)。那在這裡是次要問題 —— 總量是 dashboard 最上面那排 tiles。",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -531,13 +533,9 @@
         "defaults": {
           "unit": "bytes",
           "custom": {
-            "fillOpacity": 35,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "normal",
-              "group": "A"
-            }
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
           }
         },
         "overrides": []
@@ -549,7 +547,9 @@
           "calcs": [
             "lastNotNull",
             "max"
-          ]
+          ],
+          "sortBy": "Last *",
+          "sortDesc": true
         },
         "tooltip": {
           "mode": "multi",
@@ -560,7 +560,7 @@
     {
       "type": "timeseries",
       "title": "CPU share of host CPU IN USE — triage view",
-      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nStacked: the gap between the stack top and 100% is everything outside a container — the kernel and host processes.\n\n堆疊顯示:堆疊頂端到 100% 的那段,就是容器以外的東西(kernel 與 host 行程)。",
+      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nNOT STACKED, deliberately. Stacking was making this panel unreadable for the one thing it is for: on a stacked chart the series drawn at the TOP reaches the highest point on the y axis no matter how small it is — its own value is the THICKNESS of its band, not its height. A namespace using almost nothing looked like the biggest consumer. Unstacked, height means value and the ranking is the picture. The legend is sorted by last value for the same reason.\n\nWhat is lost: the composition view, where the top of the stack showed the total. That is the lesser question here — the totals are the tiles at the top of the dashboard.\n\n**刻意不堆疊。**堆疊讓這個 panel 在它唯一的用途上變得不可讀:堆疊圖裡畫在**最上層**的 series 會碰到 y 軸最高點,不管它多小 —— 它自己的值是那條帶子的**厚度**而不是高度。幾乎沒在用的 namespace 看起來會像最大的消費者。取消堆疊後,高度就是數值,ranking 就是整張圖在講的事。legend 也依最後一筆數值排序,理由相同。\n\n失去的是「組成」視角(堆疊頂端等於總量)。那在這裡是次要問題 —— 總量是 dashboard 最上面那排 tiles。",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -588,13 +588,9 @@
           "min": 0,
           "decimals": 1,
           "custom": {
-            "fillOpacity": 18,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "normal",
-              "group": "A"
-            }
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
           }
         },
         "overrides": []
@@ -606,7 +602,9 @@
           "calcs": [
             "lastNotNull",
             "max"
-          ]
+          ],
+          "sortBy": "Last *",
+          "sortDesc": true
         },
         "tooltip": {
           "mode": "multi",
@@ -617,7 +615,7 @@
     {
       "type": "timeseries",
       "title": "Memory share of host memory IN USE — triage view",
-      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nStacked: the gap to 100% is the kernel, the page cache, and every host process outside a container — on this node that gap is about two thirds.\n\n堆疊顯示:到 100% 的那段是 kernel、page cache 與所有容器外的 host 行程 —— 這台機器上那段大約是三分之二。",
+      "description": "WHY A SECOND DENOMINATOR EXISTS. The panels above this one are absolute — cores and bytes — and answer 'how much room is left'. This one answers 'who is causing the pressure I am looking at', which is a different question and the one you have during an incident. When memory sits at 92%, 'snoopy uses 1.0% of the machine' is useless; 'snoopy is 38% of what is resident' is the answer.\n\nRead it only when the corresponding tile is HIGH. The denominator is whatever is currently in use, so when that is small the shares are noise amplified: at 1.3% host CPU a namespace can hold 27% of it and still be using a third of one percent of the machine.\n\nscalar() is used rather than a label join because the two sides come from DIFFERENT scrape targets — container metrics from cAdvisor via the kubelet, host memory from the node-exporter pod — so their `instance` labels do not match and `on(instance)` would silently return nothing. The cost is that scalar() requires exactly one series on the right: this panel is correct for ONE NODE per selected cluster and would read NaN with two.\n\n為什麼要有第二個分母。上面那些 panel 是絕對值(cores、bytes),回答「還剩多少」;這個回答「我現在看到的壓力是誰造成的」—— 那是出事當下的問題。記憶體卡在 92% 的時候,「snoopy 佔整機 1.0%」沒有用,「snoopy 佔目前常駐的 38%」才是答案。\n\n**只在對應的 tile 很高時才讀它。**分母是「目前使用中」的量,分母小的時候佔比就是被放大的噪音:host CPU 只有 1.3% 時,某個 namespace 可以佔掉其中 27%,而那仍然只是整台機器的千分之三。\n\n用 scalar() 而不是 label join,是因為兩邊來自**不同的 scrape target** —— container 指標經 kubelet 從 cAdvisor 來,host 記憶體來自 node-exporter pod —— 兩者的 `instance` label 對不起來,`on(instance)` 會靜默回傳空的。代價是 scalar() 要求右邊剛好一條 series:這個 panel 在「每個選定 cluster 只有一個節點」時才正確,有兩個節點會顯示 NaN。\n\nNOT STACKED, deliberately. Stacking was making this panel unreadable for the one thing it is for: on a stacked chart the series drawn at the TOP reaches the highest point on the y axis no matter how small it is — its own value is the THICKNESS of its band, not its height. A namespace using almost nothing looked like the biggest consumer. Unstacked, height means value and the ranking is the picture. The legend is sorted by last value for the same reason.\n\nWhat is lost: the composition view, where the top of the stack showed the total. That is the lesser question here — the totals are the tiles at the top of the dashboard.\n\n**刻意不堆疊。**堆疊讓這個 panel 在它唯一的用途上變得不可讀:堆疊圖裡畫在**最上層**的 series 會碰到 y 軸最高點,不管它多小 —— 它自己的值是那條帶子的**厚度**而不是高度。幾乎沒在用的 namespace 看起來會像最大的消費者。取消堆疊後,高度就是數值,ranking 就是整張圖在講的事。legend 也依最後一筆數值排序,理由相同。\n\n失去的是「組成」視角(堆疊頂端等於總量)。那在這裡是次要問題 —— 總量是 dashboard 最上面那排 tiles。",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -645,13 +643,9 @@
           "min": 0,
           "decimals": 1,
           "custom": {
-            "fillOpacity": 18,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "normal",
-              "group": "A"
-            }
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
           }
         },
         "overrides": []
@@ -663,7 +657,9 @@
           "calcs": [
             "lastNotNull",
             "max"
-          ]
+          ],
+          "sortBy": "Last *",
+          "sortDesc": true
         },
         "tooltip": {
           "mode": "multi",
