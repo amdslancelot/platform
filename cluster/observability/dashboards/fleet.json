@@ -830,8 +830,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Image store on disk — should be a SAWTOOTH",
-      "description": "prune-images.timer runs daily at 03:00 and prunes both stores. A daily drop then regrowth as deploys land is healthy. A FLAT LINE means the timer is not firing — that is what this metric exists to catch.\n\nprune-images.timer 每日 03:00 清兩個 store。每日下降、隨部署回升是正常的。一條平線代表 timer 沒在跑 —— 這正是這個指標存在的意義。",
+      "title": "Image store as % of its own filesystem — still a SAWTOOTH",
+      "description": "Each image store as a fraction of the filesystem it actually sits on — containerd on /var/lib/rancher, podman on /var/lib/containers. Those are separate volumes since docs/runbook-storage.md, so each store has its own denominator and neither shows up in /.\n\nStill the SAWTOOTH check: prune-images.timer runs daily at 03:00 and prunes both stores. A daily drop then regrowth as deploys land is healthy. A FLAT LINE means the timer is not firing — that is what this metric exists to catch. The shape survives the change to a percentage because each denominator is a fixed volume size.\n\nCAVEAT: the containerd figure measures the CONTENT store (io.containerd.content.v1.content) only, not everything containerd keeps under /var/lib/rancher — so that series is a LOWER BOUND on the volume's real image footprint. podman's number covers its whole storage root and is not.\n\nThe two series are joined `on(instance, mountpoint)` after label_replace maps each store name to its mountpoint; the store metric comes from node-exporter's textfile collector, so it carries the same instance label as the filesystem metric and this stays correct with more than one node.\n\n每個 image store 佔「它實際所在的 filesystem」的比例 —— containerd 在 /var/lib/rancher,podman 在 /var/lib/containers。這兩個是獨立的卷,各有各的分母,而且都不會出現在 / 裡面。\n\n仍然是 SAWTOOTH 檢查:prune-images.timer 每日 03:00 清兩個 store,每日下降、隨部署回升是正常的;一條平線代表 timer 沒在跑。改成百分比後波形不變,因為分母是固定的卷大小。\n\n注意:containerd 那條只量 content store,不是 containerd 在 /var/lib/rancher 底下的全部,所以它是該卷實際 image 佔用的**下界**。podman 那條涵蓋整個 storage root,不是下界。",
       "gridPos": {
         "h": 9,
         "w": 8,
@@ -849,17 +849,49 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "image_store_disk_bytes{cluster=~\"$cluster\"}",
-          "legendFormat": "{{store}}"
+          "expr": "label_replace(image_store_disk_bytes{cluster=~\"$cluster\", store=\"containerd\"}, \"mountpoint\", \"/var/lib/rancher\", \"\", \"\")\n  / on(instance, mountpoint) group_left()\n    node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=\"/var/lib/rancher\"}",
+          "legendFormat": "containerd → /var/lib/rancher"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(image_store_disk_bytes{cluster=~\"$cluster\", store=\"podman\"}, \"mountpoint\", \"/var/lib/containers\", \"\", \"\")\n  / on(instance, mountpoint) group_left()\n    node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=\"/var/lib/containers\"}",
+          "legendFormat": "podman → /var/lib/containers"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "decimals": 1,
           "custom": {
             "fillOpacity": 10,
             "lineWidth": 1,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
           }
         },
         "overrides": []
@@ -881,8 +913,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Pod container logs, total",
-      "description": "Written by the host systemd timer into node-exporter's textfile collector — NOT a Kubernetes metric. If this flatlines while deploys continue, the timer stopped.\n\n由 host 上的 systemd timer 寫進 node-exporter 的 textfile collector,不是 Kubernetes 指標。若持續部署但這條變平,就是 timer 停了。",
+      "title": "Pod container logs — % of the root filesystem",
+      "description": "Total container-log bytes as a fraction of the filesystem they sit on. /var/log/pods is on the ROOT volume — the two volumes docs/runbook-storage.md split out are /var/lib/rancher and /var/lib/containers, and /var/log was not among them — so the denominator is `/`.\n\nVERIFY THAT ASSUMPTION if this ever looks wrong: `df -h /var/log/pods` on the node must report the same filesystem as `df -h /`. If /var/log is ever given its own volume, this panel's denominator becomes silently wrong — it would still draw a plausible line, just against the wrong disk.\n\nWritten by the host systemd timer into node-exporter's textfile collector — NOT a Kubernetes metric. If this flatlines while deploys continue, the timer stopped.\n\nThis MEASURES the logs; it does not bound them. containerd log rotation (max_size/max_file) is the cap and is still open — see runbook.md §A.\n\ncontainer log 總量佔「它所在的 filesystem」的比例。/var/log/pods 在**根**卷上 —— docs/runbook-storage.md 拆出去的兩個卷是 /var/lib/rancher 和 /var/lib/containers,/var/log 不在其中 —— 所以分母是 `/`。\n\n這個假設若看起來不對就去驗:節點上 `df -h /var/log/pods` 必須和 `df -h /` 是同一個 filesystem。哪天 /var/log 被拆成獨立卷,這個 panel 的分母就會**靜默地**變錯 —— 它仍然會畫出一條看起來合理的線,只是對錯誤的磁碟算的。\n\n由 host 上的 systemd timer 寫進 node-exporter 的 textfile collector,不是 Kubernetes 指標。若持續部署但這條變平,就是 timer 停了。\n\n這只是**量測**,不會限制它。真正的上限是 containerd log rotation,尚未處理 —— 見 runbook.md §A。",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -900,17 +932,39 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "pod_log_total_bytes{cluster=~\"$cluster\"}",
-          "legendFormat": "total"
+          "expr": "pod_log_total_bytes{cluster=~\"$cluster\"}\n  / on(instance) group_left()\n    node_filesystem_size_bytes{cluster=~\"$cluster\", mountpoint=\"/\"}",
+          "legendFormat": "logs on /"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "percentunit",
+          "min": 0,
+          "decimals": 2,
           "custom": {
             "fillOpacity": 10,
             "lineWidth": 1,
-            "showPoints": "never"
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.1
+              }
+            ]
           }
         },
         "overrides": []
