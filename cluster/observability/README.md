@@ -3,14 +3,52 @@
 Fleet monitoring for the single node `louis2` (A1.Flex, **2 OCPU / 12 GB**).
 The design principle is **offload**: a lightweight collector on the node ships
 metrics to Grafana Cloud, so the node keeps none of the storage/query load — a
-monitor must never compete for the resources it is monitoring. Only three small
-things run on the node (~200 MB total): Grafana Alloy, node-exporter,
-postgres-exporter.
+monitor must never compete for the resources it is monitoring. Three things run
+on the node: Grafana Alloy, node-exporter, postgres-exporter.
 
 *單節點 `louis2`(A1.Flex,**2 OCPU / 12 GB**)的機隊監控。設計原則是**外送**:
 節點上只跑輕量採集器,把指標送到 Grafana Cloud,重活(儲存、查詢)全不落在節點
-——監控系統絕不該跟它監控的對象搶資源。節點上只多三個小東西(合計約 200 MB):
-Grafana Alloy、node-exporter、postgres-exporter。*
+——監控系統絕不該跟它監控的對象搶資源。節點上只多三個東西:Grafana Alloy、
+node-exporter、postgres-exporter。*
+
+**Measured 2026-08-04, and it is not as light as this README first claimed.** An
+earlier draft said "~200 MB total". The real figure, the day the stack went live:
+
+***2026-08-04 實測,而且沒有本 README 原先聲稱的那麼輕。**舊稿寫「合計約 200 MB」,
+上線當天的實際數字是:*
+
+| namespace | working set | note |
+|---|---|---|
+| **observability** | **397 MB** | the largest on the node |
+| kube-system | 269 MB | |
+| cert-manager | 143 MB | |
+| snoopy + gelp + transigen + web | 259 MB | **all four apps combined** |
+| data (Postgres) | 58 MB | |
+
+So the collector currently outweighs everything it collects from. The offload
+principle still holds where it matters — no TSDB, no query engine, no PVC, and
+CPU across the whole fleet is ~1.3% of two cores — but "a monitor must never
+compete for the resources it is monitoring" is a claim this stack has not fully
+earned yet, and pretending otherwise in the README would be the wrong kind of
+documentation.
+
+*所以採集器目前比它所採集的一切加起來還重。offload 原則在關鍵處仍然成立 —— 沒有
+TSDB、沒有查詢引擎、沒有 PVC,整個機隊的 CPU 只用掉兩顆核心的約 1.3% —— 但「監控系統
+絕不該跟它監控的對象搶資源」這句話,這個 stack 還沒有完全做到。在 README 裡假裝做到了
+是錯誤的文件寫法。*
+
+The cause is known and is being worked: the kubelet endpoint's ~46.5k series are
+parsed into label sets before the allowlist discards 99.9% of them, and that
+parse-and-discard is what Alloy's memory goes to. `scrape_interval = "5m"` on
+that one job (2026-08-04) cuts how often it happens by 5x. Alloy's 400Mi limit is
+**deliberately left alone until that is re-measured** — lowering a limit on a
+process already near it buys an OOMKill, not a saving. See `pending.md` §2.8.
+
+*成因已知且處理中:kubelet 端點那 ~46.5k 條 series 會先被解析成 label set,allowlist
+才丟掉其中 99.9%,而 Alloy 的記憶體就花在這段「解析完再丟」。2026-08-04 為該 job 設
+`scrape_interval = "5m"`,讓這件事少發生 5 倍。Alloy 的 400Mi limit **刻意先不動,等
+重新量測**  —— 對一個已經逼近上限的行程調低 limit,換來的是 OOMKill 不是節省。見
+`pending.md` §2.8。*
 
 ## What it monitors / 監控什麼
 

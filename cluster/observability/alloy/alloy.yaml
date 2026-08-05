@@ -68,9 +68,30 @@ data:
     // 未過濾的 kubelet 端點每次 scrape 產生 46,563 個樣本 —— 佔整個機隊的 88%,單這一個
     // job 就是 10k 免費上限的 4.6 倍。絕大部分是 histogram 的 bucket,而這裡沒有人查它們。
     // 這個 stack 真正要的 per-app CPU/RAM 來自 cadvisor(3,117),不是這裡。
+    // scrape_interval 5m, not the 60s default: the allowlist below drops 99.9%
+    // of this endpoint's payload, but only AFTER kubelet has serialized it and
+    // Alloy has parsed it into label sets. That parse-and-discard is what makes
+    // Alloy the heaviest namespace on this node (397 MB measured 2026-08-04),
+    // and running it 5x less often is the only lever that touches it — filtering
+    // cannot, because filtering happens downstream of the cost.
+    //
+    // Nothing is lost. Everything kept here is slow-moving (pod counts, PVC
+    // bytes, cumulative counters). Liveness is unaffected: `cadvisor` scrapes the
+    // SAME kubelet on a different path every 60s, so a dead kubelet still surfaces
+    // within a minute via up{job="cadvisor"}.
+    //
+    // scrape_interval 設 5m 而非預設的 60s:下面的 allowlist 丟掉這個端點 99.9% 的內容,
+    // 但那是在 kubelet 序列化完、Alloy 解析成 label set 之後才發生。這段「解析完再丟」
+    // 正是 Alloy 成為本節點最肥 namespace(2026-08-04 實測 397 MB)的原因,而少跑 5 倍
+    // 是唯一能碰到它的手段 —— 過濾碰不到,因為過濾在成本的下游。
+    //
+    // 不損失任何東西:留下來的全是慢速變化的指標。liveness 也不受影響 —— `cadvisor`
+    // 每 60s 抓同一個 kubelet 的另一個路徑,kubelet 掛了一分鐘內就會反映在
+    // up{job="cadvisor"} 上。
     prometheus.scrape "kubelet" {
       targets           = discovery.relabel.kubelet.output
       job_name          = "kubelet"
+      scrape_interval   = "5m"
       scheme            = "https"
       metrics_path      = "/metrics"
       bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"

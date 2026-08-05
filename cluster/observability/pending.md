@@ -510,6 +510,78 @@ kubelet.
 *`README.md` 寫「10k 對這個機隊夠用」在**過濾之後是對的** —— 那句話沒錯,只是對未經
 過濾的 kubelet 從來就不成立。*
 
+### 2.8 The collector is the heaviest thing on the node — OPEN
+
+*採集器是節點上最重的東西 —— 未結案*
+
+Same day, `sum by (namespace) (container_memory_working_set_bytes{container!="",
+container!="POD"})`:
+
+| namespace | working set |
+|---|---|
+| **observability** | **397 MB** |
+| kube-system | 269 MB |
+| cert-manager | 143 MB |
+| snoopy 122 + gelp 72 + transigen 58 + web 7 | **259 MB combined** |
+| data (Postgres) | 58 MB |
+
+**Note the filter.** Without `container!=""` and `container!="POD"` the same query
+returns ~2x these numbers, because cAdvisor emits a series for the pod-level
+cgroup *and* the pause container *and* each real container — summing all three
+double-counts. The first reading of this taken during the install said 890 MB for
+`observability` and was wrong for exactly that reason.
+
+***注意那個 filter。**少了 `container!=""` 與 `container!="POD"`,同一條查詢會得到約
+兩倍的數字 —— cAdvisor 對 pod 層級的 cgroup、pause container、以及每個真實 container
+各發一條 series,全部相加就是重複計算。安裝過程中第一次量到的
+`observability` = 890 MB 就是因此而錯的。*
+
+Two things are true at once and both belong in the record: the offload principle
+holds where it was aimed (no TSDB, no query engine, no PVC, fleet-wide CPU ~1.3%
+of two cores), **and** the collector currently outweighs every workload it
+collects from. `README.md`'s "~200 MB total" was an estimate that reality
+overshot by 2x; it has been replaced with the measurement.
+
+*兩件事同時為真,而且都該記下來:offload 原則在它瞄準的地方成立(沒有 TSDB、沒有查詢
+引擎、沒有 PVC,整個機隊的 CPU 約兩顆核心的 1.3%),**而且**採集器目前比它採集的所有
+workload 都重。`README.md` 的「約 200 MB」是估算,實際超出 2 倍,已改成實測值。*
+
+The cause is §2.7's leftover: the kubelet endpoint's ~46.5k series are parsed into
+label sets *before* the allowlist discards 99.9% of them. Filtering cannot reach
+that cost — it sits downstream of it. The only lever is frequency, so
+`scrape_interval = "5m"` was set on that job (2026-08-04).
+
+*成因是 §2.7 的殘留:kubelet 端點那 ~46.5k 條 series 會在 allowlist 丟掉 99.9% 之**前**
+就被解析成 label set。過濾碰不到這個成本 —— 它在成本的下游。唯一的槓桿是頻率,所以在
+該 job 上設了 `scrape_interval = "5m"`(2026-08-04)。*
+
+**Still open — the next action is a measurement, not a change.** Re-run the query
+above after the 5m interval has been live for an hour. Then:
+
+***仍未結案 —— 下一步是量測,不是改動。**等 5m interval 上線一小時後重跑上面那條查詢,
+然後:*
+
+- If `observability` drops to ~250 MB or below, lower Alloy's `limits.memory`
+  from 400Mi to leave a real headroom margin, and stop here.
+  *若降到約 250 MB 以下,把 Alloy 的 `limits.memory` 從 400Mi 調低到留有實質餘裕的
+  值,到此為止。*
+- If it barely moves, the memory is not scrape churn but retained state (WAL
+  buffer, discovery cache), and the lever is different — investigate before
+  touching limits.
+  *若幾乎沒動,記憶體就不是 scrape churn 而是持有的狀態(WAL buffer、discovery
+  cache),槓桿不同 —— 先查清楚再動 limit。*
+
+**Do not lower the 400Mi limit before that measurement.** Alloy's `GOMEMLIMIT` is
+derived from the container limit (`377487360` ≈ 90% of 400Mi), so cutting the
+limit cuts the Go heap ceiling on a process that is already living near it. The
+result is OOMKill, and an OOMKilled collector is a monitoring outage that looks
+like a metrics gap.
+
+***在那次量測之前不要調低 400Mi。**Alloy 的 `GOMEMLIMIT` 是從 container limit 推導的
+(`377487360` ≈ 400Mi 的 90%),所以調低 limit 等於對一個已經逼近上限的行程收緊 Go heap
+天花板,結果是 OOMKill —— 而被 OOMKill 的採集器,呈現出來的樣子是「指標有缺口」,不是
+「監控掛了」。*
+
 ---
 
 ## 3. The two free Frankfurt micros — measured 2026-08-02
