@@ -262,7 +262,7 @@
     {
       "type": "stat",
       "title": "Load per core (1m)",
-      "description": "node_load1 divided by the core count, so 1.0 means the run queue exactly matches the CPUs available. Dividing makes it comparable across machines of different sizes.\n\nnode_load1 除以核心數,1.0 代表 run queue 剛好等於可用的 CPU 數。除過之後,不同大小的機器才能互相比較。",
+      "description": "node_load1 divided by the core count, so 1.0 means the run queue exactly matches the CPUs available. Dividing makes it comparable across machines of different sizes.\n\nThe division is `on(instance) group_left()` on purpose. A bare `/ count(...)` returns a vector with NO labels, and PromQL will not match a labelled vector against an unlabelled one — the panel renders 'No data' with no error. Matching on `instance` also keeps it correct once there is more than one node.\n\nnode_load1 除以核心數,1.0 代表 run queue 剛好等於可用的 CPU 數;除過之後不同大小的機器才能互相比較。\n\n除法刻意寫成 `on(instance) group_left()`。直接 `/ count(...)` 得到的是一個**沒有 label** 的向量,而 PromQL 不會把有 label 的向量跟沒 label 的配對 —— panel 會顯示 No data 且不報錯。用 instance 配對也讓它在多節點時仍然正確。",
       "gridPos": {
         "h": 5,
         "w": 5,
@@ -280,7 +280,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "node_load1{cluster=~\"$cluster\"} / count(count by (cpu) (node_cpu_seconds_total{cluster=~\"$cluster\"}))",
+          "expr": "node_load1{cluster=~\"$cluster\"}\n  / on(instance) group_left()\n    count by (instance) (node_cpu_seconds_total{cluster=~\"$cluster\", mode=\"idle\"})",
           "legendFormat": "load/core"
         }
       ],
@@ -381,7 +381,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (pod) (container_memory_working_set_bytes{cluster=~\"$cluster\", namespace=\"observability\", container!=\"\", container!=\"POD\"} / container_spec_memory_limit_bytes{cluster=~\"$cluster\", namespace=\"observability\", container!=\"\", container!=\"POD\"})",
+          "expr": "max by (pod) (\n  sum by (pod, container) (container_memory_working_set_bytes{cluster=~\"$cluster\", namespace=\"observability\", container!=\"\", container!=\"POD\"})\n  / on(pod, container) group_left()\n  sum by (pod, container) (container_spec_memory_limit_bytes{cluster=~\"$cluster\", namespace=\"observability\", container!=\"\", container!=\"POD\"})\n)",
           "legendFormat": "mem/limit {{pod}}",
           "instant": true
         },
