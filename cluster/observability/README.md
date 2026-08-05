@@ -93,6 +93,9 @@ scripts/image-metrics.sh       host: image count/size → textfile .prom
 scripts/log-size.sh            host: per-pod log dir size → textfile .prom
 scripts/observability-metrics.{service,timer}   systemd: run the two scripts every 5m
 scripts/install-metrics-timer.sh   installs both scripts to /usr/local/sbin (SELinux) + the units
+scripts/public-metrics.sh      host: Grafana Cloud -> allowlisted JSON -> ConfigMap (public page)
+scripts/public-metrics.{service,timer}          systemd: refresh the public snapshot every 5m
+scripts/install-public-metrics.sh  installs the above + prompts once for the metrics:read token
 dashboards/fleet.json          the fleet dashboard — import into Grafana, see below
 runbook.md                     command-led install + verify (Grafana Cloud, secrets, rotation, prune)
 pending.md                     MUST-READ before applying: pre-flight fixes + the open backend decision
@@ -145,3 +148,24 @@ reads only node-exporter, which this stack does run.
 
 *若想要更深入的主機視圖,社群的 `1860`(Node Exporter Full)可以直接用 —— 它只讀
 node-exporter,而本 stack 有跑。*
+
+## The public snapshot / 公開快照
+
+`lans-h.cc/fleet.html` shows a deliberately small subset of these metrics to the
+public internet. It is **not** an embedded Grafana: a timer on the node runs a
+fixed list of queries, reduces them to one JSON document, and publishes it as a
+ConfigMap that `my_website`'s nginx pod mounts. The visitor gets a file, so there
+is no query interface to go around — see `pending.md` §5.5 for why that beat
+running Grafana OSS, and runbook **Step 6** to install it.
+
+*`lans-h.cc/fleet.html` 把這些指標中刻意挑過的一小部分公開。它**不是**嵌入的 Grafana:
+節點上一個 timer 跑固定的查詢,縮成一份 JSON,以 ConfigMap 發布給 `my_website` 的 nginx
+pod 掛載。訪客拿到的是檔案,所以沒有可繞過的查詢介面 —— 為什麼這勝過跑 Grafana OSS
+見 `pending.md` §5.5,安裝見 runbook **Step 6**。*
+
+**Before adding a query to it, read the redaction contract** at the top of
+`scripts/public-metrics.sh`. The namespace map there is an allowlist: a namespace
+added to the cluster later does not appear on the public page by default.
+
+***在替它加查詢之前,先讀 `scripts/public-metrics.sh` 開頭的 redaction contract。**
+那裡的 namespace 對照表是白名單:之後新增到叢集的 namespace 不會預設出現在公開頁上。*

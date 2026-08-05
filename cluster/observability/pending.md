@@ -1196,6 +1196,96 @@ already in that UI costs nothing, whereas coming back later means a second pass.
 唯一提前處理的是 runbook §0c 那組選配的唯讀 policy —— 現在記進去,是因為 Step 0 還沒
 跑,人已經在那個 UI 裡時多建一組 access policy 不花成本,之後再回頭就是多跑一趟。*
 
+### 5.5 Resolved 2026-08-04 — a static snapshot, not a Grafana
+
+*2026-08-04 定案 —— 靜態快照,不是 Grafana*
+
+§5.4 deferred this. Building it settled it, and **not** in favour of §5.2's
+Grafana-OSS-as-a-UI-layer. What ships instead: a systemd timer on the node runs a
+fixed list of PromQL against Grafana Cloud with a `metrics:read` token, reduces
+the answers to one small JSON document, and publishes it as the ConfigMap
+`web/fleet-public-metrics`, which `my_website`'s nginx pod mounts at
+`/metrics/data.json`. The public page is `lans-h.cc/fleet.html` — a static file
+that fetches that JSON.
+
+*§5.4 說延後。實際做下去就定了案,而且**不是**選 §5.2 的「Grafana OSS 當 UI 層」。
+最後採用的是:節點上一個 systemd timer 用 `metrics:read` token 對 Grafana Cloud 跑一組
+固定的 PromQL,把結果縮成一份小 JSON,以 ConfigMap `web/fleet-public-metrics` 發布,
+由 `my_website` 的 nginx pod 掛在 `/metrics/data.json`。公開頁是
+`lans-h.cc/fleet.html`,一個去抓那份 JSON 的靜態檔。*
+
+Three reasons it beat the Grafana route:
+
+*勝過 Grafana 那條路的三個理由:*
+
+| | Grafana OSS as UI layer (§5.2) | Static snapshot (chosen) |
+|---|---|---|
+| **Redaction** | anonymous Grafana exposes a **datasource proxy** that forwards arbitrary PromQL — a visitor can ask for `pg_database_size_bytes` or pod names even if no panel shows them | the visitor gets a **file**. There is no query interface. What §5.3 forbids is simply not in the document |
+| **Node cost** | +150–250 MB resident, on the namespace `README.md` just measured as the **heaviest on the node** (397 MB) | one `curl`+`jq` process for ~2 s every 5 min, no resident memory |
+| **New surface** | one more Deployment, one more Ingress, one more public listener to patch | nothing new listens; the existing nginx serves one more static path |
+
+The redaction row is the deciding one. §5.3 required "a separate dashboard
+containing only deliberately chosen panels" — but a *panel* allowlist on an
+anonymous Grafana is decoration, because the proxy behind it answers queries the
+panels never make. An allowlist that the visitor cannot go around has to be on
+the **producer** side, and that is what this is: `NS_LABELS` in
+`scripts/public-metrics.sh` drops any namespace not named in it, so a namespace
+added later does not leak by default.
+
+*決定性的是 redaction 那一列。§5.3 要求「另做一份只放刻意挑過的 panel 的 dashboard」——
+但在 anonymous Grafana 上做 **panel** 白名單只是裝飾,因為它背後的 proxy 會回答那些
+panel 從來沒問過的查詢。訪客繞不過去的白名單必須做在**產生端**,這份實作就是:
+`scripts/public-metrics.sh` 裡的 `NS_LABELS` 會丟掉任何不在表上的 namespace,
+所以之後新增的 namespace 不會預設外洩。*
+
+**What is published**, exactly: node CPU/memory/disk as used-vs-total, load per
+core, uptime, a healthy-target *count*, and per-workload memory and CPU under
+display names. **What is not**: the node's IP and hostname, the `:9000` port, the
+string `k3s`, pod names, mountpoint paths, database names and sizes, and *which*
+target is unhealthy when one is. The last two are deliberate — `pg_database_size_bytes`
+is per-app business data, and naming the down target tells a stranger where to aim.
+
+***確切發布的內容**:節點 CPU/記憶體/磁碟的 used-vs-total、load per core、uptime、
+健康 target 的**數量**,以及各 workload 的記憶體與 CPU(用顯示名)。**不發布的**:
+節點 IP 與 hostname、`:9000`、字串 `k3s`、pod 名、mountpoint 路徑、資料庫名稱與大小,
+以及有 target 掛掉時**是哪一個**。最後兩項是刻意的 —— `pg_database_size_bytes` 是
+per-app 的業務資料,而指名掛掉的是哪個 target 等於告訴陌生人往哪打。*
+
+**The one real concession:** the `metrics:read` token now lives on the node, in
+`/etc/observability/public-metrics.env` (0600 root). §0c's argument for a
+write-only token was precisely that this node is internet-reachable. The reason
+it is acceptable: **root on this node already reads every one of these metrics at
+its source** — `kubectl`, the node-exporter endpoint, the Postgres socket. A
+token that reads the aggregate of the same data grants an attacker who already
+has root nothing new. It would not be acceptable to give this token to anything
+below root, which is why the browser never sees it and the file is 0600.
+
+***唯一真正的妥協:** `metrics:read` token 現在放在節點上的
+`/etc/observability/public-metrics.env`(0600 root)。§0c 主張只給 write 權限,理由正是
+這台節點對外可達。可接受的理由是:**能拿到這台 root 的人,本來就從來源讀得到這些指標**
+—— `kubectl`、node-exporter 端點、Postgres socket 都在他手上。一支只能讀「同一份資料的
+聚合」的 token,對已經有 root 的攻擊者不增加任何能力。給權限低於 root 的東西就不可接受,
+所以瀏覽器永遠看不到它,檔案是 0600。*
+
+Files: `scripts/public-metrics.sh`, `scripts/public-metrics.{service,timer}`,
+`scripts/install-public-metrics.sh`, runbook Step 6; and in `my_website`:
+`public/fleet.html` plus the `optional: true` ConfigMap volume in
+`k8s/deployment.yaml`. **`optional: true` is load-bearing** — without it a
+missing ConfigMap holds the site pod in `ContainerCreating`, i.e. an auxiliary
+display feature would take `lans-h.cc` down.
+
+*檔案:如上;`my_website` 那邊是 `public/fleet.html` 與 `k8s/deployment.yaml` 裡
+`optional: true` 的 ConfigMap volume。**`optional: true` 是關鍵** —— 少了它,
+ConfigMap 不存在會讓網站 pod 卡在 `ContainerCreating`,一個附屬展示功能反而弄掉
+`lans-h.cc`。*
+
+Still open: whether to link `fleet.html` from the homepage or leave it
+unlinked-but-public. Unlinked is not a security control (the URL is guessable and
+`canonical` is set), so this is a presentation choice, not a safety one.
+
+*仍未決:要不要從首頁連到 `fleet.html`,還是不連但可公開存取。不連**不是**安全控制
+(URL 猜得到,而且已設 `canonical`),所以這是呈現上的選擇,不是安全上的。*
+
 ---
 
 ## Unrelated hygiene / 無關的小事

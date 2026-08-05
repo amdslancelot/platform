@@ -558,6 +558,80 @@ Postgres 連線數逼近上限。*
 
 ---
 
+## Step 6 — (optional) the public snapshot on `lans-h.cc`
+
+*選配 —— `lans-h.cc` 上的公開快照*
+
+Only if you want the fleet numbers visible on the public site. Needs the
+**`metrics:read`** policy from §0c's optional part; the write-only Alloy token
+cannot do this. Nothing else in this runbook depends on it.
+
+*只有想把機隊數字公開在網站上時才做。需要 §0c 選配那組 **`metrics:read`** policy ——
+Alloy 那支 write-only token 做不到。本 runbook 其他步驟都不依賴它。*
+
+### 6a. Install the snapshot timer / 安裝快照 timer
+
+**Goal / 目標:** a timer that turns whitelisted queries into one small JSON and
+publishes it as a ConfigMap, every 5 minutes.
+
+*一個 timer,每 5 分鐘把白名單查詢的結果縮成一份小 JSON,以 ConfigMap 發布。*
+
+```bash
+cd ~opc/platform && git pull                                  # 取得 public-metrics.*
+sudo bash cluster/observability/scripts/install-public-metrics.sh
+#   ↑ 首次執行會問三個值(query URL / instance ID / metrics:read token),
+#     寫進 /etc/observability/public-metrics.env (0600 root)。之後重跑不再問。
+#   ↑ query URL 是 0b 那個 base 加 /api/prom,例如
+#     https://prometheus-prod-65-prod-eu-west-2.grafana.net/api/prom
+```
+
+**Expect / 預期:** the installer prints the first snapshot's summary line and the
+next timer run. A failure here publishes nothing — the previous ConfigMap stays.
+
+*安裝程式印出第一份快照的摘要與下次執行時間。這一步失敗不會發布任何東西,舊的
+ConfigMap 保留不動。*
+
+### 6b. Verify what is actually being published / 確認實際發布了什麼
+
+**Goal / 目標:** read the published document with your own eyes before it is
+public. This is the redaction checkpoint, not a formality.
+
+*在它公開之前,親眼讀過發布出去的內容。這是 redaction 檢查點,不是形式。*
+
+```bash
+kubectl -n web get configmap fleet-public-metrics \
+  -o jsonpath='{.data.data\.json}' | jq .                     # 完整內容
+kubectl -n web get configmap fleet-public-metrics \
+  -o jsonpath='{.data.data\.json}' | grep -Ei '92\.5|louis2|k3s|9000|pod|datname' \
+  && echo "LEAK — 不該出現的字串" || echo "clean"              # 反向檢查
+```
+
+**Expect / 預期:** app display names, node totals, and usage numbers — and the
+second command prints `clean`. No IP, no hostname, no `k3s`, no `:9000`, no pod
+names, no database names.
+
+*預期:只有 app 顯示名稱、節點總量與用量數字,第二條指令印出 `clean`。沒有 IP、沒有
+hostname、沒有 `k3s`、沒有 `:9000`、沒有 pod 名、沒有資料庫名。*
+
+**問題 / Problem:** the page shows "snapshot unavailable" although the ConfigMap
+exists. **解法 / Fix:** the site pod predates the volume mount — `my_website`'s
+Deployment must carry the `fleet-public-metrics` volume, and a running pod does
+not gain a volume without being replaced.
+
+```bash
+kubectl -n web rollout restart deploy/lans-h-site               # 讓 pod 帶上新的 volume
+kubectl -n web exec deploy/lans-h-site -- ls -l /usr/share/nginx/html/metrics
+```
+
+**Expect / 預期:** `data.json` is listed. Note the ConfigMap volume is mounted
+`optional: true`, so a missing snapshot degrades that one page and never blocks
+the site from starting.
+
+*預期:列出 `data.json`。該 volume 是 `optional: true`,所以快照不存在時只有那一頁
+降級,永遠不會擋住網站啟動。*
+
+---
+
 ## Two things monitoring does NOT fix / 光監控解決不了的兩件事
 
 Watching a number climb doesn't stop it. Of the two caps below, **B is already

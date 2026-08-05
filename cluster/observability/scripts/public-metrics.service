@@ -1,0 +1,30 @@
+# Public fleet snapshot producer. oneshot, fired by public-metrics.timer.
+# Queries Grafana Cloud read-only and republishes a small allowlisted JSON as
+# the ConfigMap web/fleet-public-metrics, which my_website's nginx pod mounts.
+#
+# Install: sudo bash cluster/observability/scripts/install-public-metrics.sh
+#
+# Separate from observability-metrics.service on purpose, three reasons:
+#   * it needs a CREDENTIAL (the metrics:read token); that unit needs none, and
+#     giving it one would widen what a compromise of either script reaches.
+#   * it runs OUTBOUND to Grafana Cloud, so it can fail from a network problem
+#     the textfile scripts are immune to — a shared unit would report one
+#     failure for two unrelated jobs.
+#   * it publishes to the PUBLIC internet. That deserves its own unit name in
+#     `systemctl list-timers`, so it is obvious something public is running.
+#
+# 刻意跟 observability-metrics.service 分開:它需要 credential、會對外連線、而且
+# 產出是公開的 —— 三件事都值得在 systemctl 裡有自己的名字。
+[Unit]
+Description=Public fleet snapshot (Grafana Cloud -> ConfigMap for lans-h.cc)
+After=k3s.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+# 0600 root-only. The read token is the only secret this unit touches.
+EnvironmentFile=/etc/observability/public-metrics.env
+ExecStart=/usr/local/sbin/public-metrics.sh
+# A failed run must NOT leave a broken snapshot published; the script already
+# refuses to overwrite a good ConfigMap with nulls, so failing is safe here.
