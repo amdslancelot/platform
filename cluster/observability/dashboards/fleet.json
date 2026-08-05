@@ -51,7 +51,8 @@
         "y": 0
       },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "description": ""
     },
     {
       "type": "stat",
@@ -448,7 +449,8 @@
         "y": 14
       },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "description": ""
     },
     {
       "type": "timeseries",
@@ -677,7 +679,8 @@
         "y": 33
       },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "description": ""
     },
     {
       "type": "timeseries",
@@ -988,7 +991,7 @@
     {
       "type": "timeseries",
       "title": "Pod logs vs free space on / — watch the GAP close",
-      "description": "Pod container logs against the free space on the volume they sit on — the two magnitudes whose convergence is the actual failure. Today they are ~24 MB versus ~170 GB, four orders of magnitude apart.\n\nWHY THE Y AXIS IS LOG SCALE: on a linear byte axis the logs line is pinned flat to the bottom and a 10x growth in it is invisible. Log scale is the only way both series are legible at once, and the thing to watch is the GAP between the two lines closing — from either direction.\n\nHOVER for the third value: logs as a fraction of that free space. Queried but hidden from the plot and legend (`hideFrom: {viz, legend}`) because it lives at ~0.01% and would be a flat line on any shared axis.\n\nREAD THE TWO LINES TOGETHER, not the ratio alone: the ratio rises either because logs grew OR because something unrelated ate the free space. Those need different fixes, and only the two magnitudes distinguish them — which is why both are plotted and the ratio is the one in the tooltip.\n\n/var/log/pods is on the ROOT volume: the volumes docs/runbook-storage.md split out are /var/lib/rancher and /var/lib/containers, and /var/log was not among them. VERIFY if this looks wrong — `df -h /var/log/pods /` on the node must report one filesystem. If /var/log is ever given its own volume this panel does not break, it draws a plausible line against the wrong disk.\n\nThis MEASURES; it does not bound. containerd log rotation (max_size/max_file) is the cap and is still open — runbook.md §A.\n\ncontainer log 總量 vs 它所在卷的剩餘空間 —— 這兩個量收斂在一起才是真正的失敗。目前約 24 MB 對約 170 GB,差四個數量級。\n\n**Y 軸為什麼是 log scale**:線性的 bytes 軸會把 logs 那條壓在底部貼平,它成長 10 倍也看不出來。log scale 是唯一能讓兩條線同時可讀的方式,而要盯的是兩條線之間的**間距**縮小 —— 從哪一邊縮小都算。\n\n**hover** 才給第三個值:logs 佔剩餘空間的比例。它有被查詢但從圖形與圖例隱藏,因為它落在約 0.01%,放在任何共用軸上都只是一條貼底的平線。\n\n**要一起讀兩條線,不要只看比例**:比例上升可能是 logs 長大,也可能是別的東西吃掉了剩餘空間。這兩者要用不同方法修,而只有兩個絕對量能分辨 —— 這就是為什麼畫的是兩條線、比例放在 tooltip。\n\n/var/log/pods 在**根**卷上。若看起來不對就驗:節點上 `df -h /var/log/pods /` 必須是同一個 filesystem。\n\n這只是**量測**,不會限制它。真正的上限是 containerd log rotation,尚未處理 —— runbook.md §A。",
+      "description": "Pod container logs against the free space on the volume they sit on — the two magnitudes whose convergence is the actual failure. Today they are ~24 MB versus ~170 GB, four orders of magnitude apart.\n\nWHY THE Y AXIS IS LOG SCALE: on a linear byte axis the logs line is pinned flat to the bottom and a 10x growth in it is invisible. Log scale is the only way both series are legible at once, and the thing to watch is the GAP between the two lines closing — from either direction.\n\nHOVER for the third value: logs as a fraction of that free space. Queried but hidden from the plot and legend (`hideFrom: {viz, legend}`) because it lives at ~0.01% and would be a flat line on any shared axis.\n\nREAD THE TWO LINES TOGETHER, not the ratio alone: the ratio rises either because logs grew OR because something unrelated ate the free space. Those need different fixes, and only the two magnitudes distinguish them — which is why both are plotted and the ratio is the one in the tooltip.\n\n/var/log/pods is on the ROOT volume: the volumes docs/runbook-storage.md split out are /var/lib/rancher and /var/lib/containers, and /var/log was not among them. VERIFIED 2026-08-05: `df -h /var/log/pods /` reported /dev/mapper/ocivolume-root for both. Re-run that command if this line ever looks wrong. If /var/log is ever given its own volume this panel does not break, it draws a plausible line against the wrong disk.\n\nThis MEASURES; it does not bound. containerd log rotation (max_size/max_file) is the cap and is still open — runbook.md §A.\n\ncontainer log 總量 vs 它所在卷的剩餘空間 —— 這兩個量收斂在一起才是真正的失敗。目前約 24 MB 對約 170 GB,差四個數量級。\n\n**Y 軸為什麼是 log scale**:線性的 bytes 軸會把 logs 那條壓在底部貼平,它成長 10 倍也看不出來。log scale 是唯一能讓兩條線同時可讀的方式,而要盯的是兩條線之間的**間距**縮小 —— 從哪一邊縮小都算。\n\n**hover** 才給第三個值:logs 佔剩餘空間的比例。它有被查詢但從圖形與圖例隱藏,因為它落在約 0.01%,放在任何共用軸上都只是一條貼底的平線。\n\n**要一起讀兩條線,不要只看比例**:比例上升可能是 logs 長大,也可能是別的東西吃掉了剩餘空間。這兩者要用不同方法修,而只有兩個絕對量能分辨 —— 這就是為什麼畫的是兩條線、比例放在 tooltip。\n\n/var/log/pods 在**根**卷上。2026-08-05 已實測:`df -h /var/log/pods /` 兩行都是 /dev/mapper/ocivolume-root。日後這條線看起來不對時再重跑一次。\n\n這只是**量測**,不會限制它。真正的上限是 containerd log rotation,尚未處理 —— runbook.md §A。",
       "gridPos": {
         "h": 6,
         "w": 24,
@@ -1124,7 +1127,8 @@
         "y": 49
       },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "description": ""
     },
     {
       "type": "timeseries",
@@ -1328,7 +1332,8 @@
         "y": 59
       },
       "collapsed": false,
-      "panels": []
+      "panels": [],
+      "description": ""
     },
     {
       "type": "timeseries",
