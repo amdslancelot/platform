@@ -125,6 +125,23 @@ disk_avail="$(scalar "node_filesystem_avail_bytes{${C}, mountpoint=\"/\"}")"
 svc_up="$(scalar "sum(up{${C}})")"
 svc_total="$(scalar "count(up{${C}})")"
 
+# Postgres cache hit ratio, aggregated across every database — NOT
+# `by (datname)`. Per-database would name the databases, and a database name
+# here is an app name plus the fact that app stores data; §5.3's redaction line
+# excluded per-app DB figures and this stays on the public side of it.
+#
+# LIFETIME counters, deliberately not the 5m rate the internal panel uses. A rate
+# is 0/0 whenever nothing queried the database in the window, and this card would
+# read "0%" every idle night — indistinguishable from a genuinely cold cache.
+# clamp_min guards the remaining division-by-zero on a freshly reset stats view.
+#
+# 跨所有 database 聚合,不用 by (datname) —— database 名字就是 app 名字加上「該 app
+# 有存資料」這個事實。刻意用 lifetime 累計而不是內部 panel 的 5m rate:rate 在無查詢
+# 的時段是 0/0,這張卡每個閒置的夜晚都會顯示 0%,跟真的 cache 沒命中分不出來。
+PGH="pg_stat_database_blks_hit{${C}, datname!=\"\"}"
+PGR="pg_stat_database_blks_read{${C}, datname!=\"\"}"
+pg_cache="$(scalar "sum(${PGH}) / clamp_min(sum(${PGH}) + sum(${PGR}), 1)")"
+
 vector "sum by (namespace) (container_memory_working_set_bytes{${CADV}})" namespace > "$work/mem.json"
 vector "sum by (namespace) (rate(container_cpu_usage_seconds_total{${CADV}}[5m]))" namespace > "$work/cpu.json"
 
@@ -147,7 +164,8 @@ jq -n \
   --argjson disk_total "$disk_total" \
   --argjson disk_avail "$disk_avail" \
   --argjson svc_up "$svc_up" \
-  --argjson svc_total "$svc_total" '
+  --argjson svc_total "$svc_total" \
+  --argjson pg_cache "$pg_cache" '
   def r2: (. * 100 | round) / 100;
   def r3: (. * 1000 | round) / 1000;
   # Fleet CPU sits near 1.3%. Rounding a RATIO to 2 places quantises that to
@@ -171,6 +189,10 @@ jq -n \
       load1_per_core:   (($load1 / $cpu_cores) | r2)
     },
     services: { up: $svc_up, total: $svc_total },
+    # null when the exporter has no answer, so the page can show "—" rather than
+    # invent a zero. r4 because this sits at ~0.99x and 2 places would flatten
+    # every real change into "99%".
+    postgres: { cache_hit_ratio: (if $pg_cache == null then null else ($pg_cache | r4) end) },
     workloads: (
       $m
       | map(select($labels[.key] != null))
