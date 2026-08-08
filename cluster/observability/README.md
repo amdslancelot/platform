@@ -116,8 +116,8 @@ reads only node-exporter, which this stack does run.
 
 ## The public snapshot
 
-`lans-h.cc/fleet.html` shows a deliberately small subset of these metrics to the
-public internet. It is **not** an embedded Grafana: a timer on the node runs a
+`lans-h.cc/dashboard.html` shows a deliberately small subset of these metrics to
+the public internet. It is **not** an embedded Grafana: a timer on the node runs a
 fixed list of queries, reduces them to one JSON document, and publishes it as a
 ConfigMap that `my_website`'s nginx pod mounts. The visitor gets a file, so there
 is no query interface to go around — see `docs/pending.md` §5.5 for why that beat
