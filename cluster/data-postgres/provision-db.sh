@@ -27,6 +27,17 @@
 # Disaster recovery (empty re-initialised volume) is the ONE case where you
 # list every app: re-run with the full roster + stored passwords, then restore
 # each database from backup.
+#
+# SECTION 2 — VERIFICATION. After provisioning, the script proves the isolation
+# it just configured rather than assuming the statements took effect: it checks
+# the role holds no SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS, that
+# PUBLIC cannot connect, and — the one that matters — it CONNECTS AS THE APP
+# ROLE TO A PEER'S DATABASE AND REQUIRES THE CONNECTION TO BE REFUSED. Any
+# failed check exits non-zero.
+#
+# A provisioning script that asserts its own outcome is the difference between
+# a CONTROL and a CLAIM. Issuing `REVOKE CONNECT` establishes the isolation;
+# only observing a refusal proves it.
 set -euo pipefail
 
 admin="${POSTGRES_USER:-postgres}"
@@ -87,6 +98,9 @@ EOSQL
   echo "provisioned: database '$db' owned by role '$role'"
 }
 
+provisioned_dbs=""
+provisioned_roles=""
+
 for app in $apps; do
   case "$app" in
     # snoopy predates the db-name == app-name convention.
@@ -94,6 +108,113 @@ for app in $apps; do
     *)      db="$app";        role="${app}_rw"; pwvar="$(echo "$app" | tr '[:lower:]' '[:upper:]')_DB_PASSWORD" ;;
   esac
   provision "$db" "$role" "${!pwvar:-}"
+  provisioned_dbs="$provisioned_dbs $db"
+  provisioned_roles="$provisioned_roles $role"
 done
 
 echo "app provisioning complete: $apps"
+
+########################################################################
+# Section 2 — VERIFY
+#
+# Everything above CONFIGURES the isolation. Everything below PROVES it,
+# by observing the outcome instead of trusting that the statements took.
+#
+# How the connection checks authenticate: this runs inside the postgres
+# pod, so psql uses the unix socket, and the official postgres image
+# initialises with `--auth-local=trust`. No password is needed, which is
+# what lets the peer test cover EVERY app in this run — including one
+# whose password was not passed in because its role already existed.
+#
+# That is also why the test is meaningful: with authentication out of the
+# way, a refusal can only come from the CONNECT privilege, which is
+# exactly the thing `REVOKE CONNECT ... FROM PUBLIC` is supposed to have
+# taken away.
+#
+# NOTE ON FAILURE: provisioning above has already completed and is
+# idempotent. A failure here does NOT mean the databases are half-made —
+# it means the isolation could not be demonstrated. Fix the finding and
+# re-run; re-running is safe.
+########################################################################
+
+echo
+echo "== verifying isolation =="
+failures=0
+
+check() { # check <description> <expected> <actual>
+  if [ "$2" = "$3" ]; then
+    echo "  ok    $1"
+  else
+    echo "  FAIL  $1 (expected '$2', got '$3')" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+for db in $provisioned_dbs; do
+  # Recover this db's role from the same mapping used above.
+  case "$db" in
+    snoopy_home) role="snoopy_rw" ;;
+    *)           role="${db}_rw" ;;
+  esac
+
+  # 2.1 — No privilege attribute that would defeat the entire model. A
+  #       SUPERUSER role ignores every GRANT and REVOKE issued above, so
+  #       this check is a precondition for all the others meaning anything.
+  #       These are PostgreSQL's CREATE ROLE defaults; asserted rather than
+  #       assumed, because a default is only a default until someone changes it.
+  attrs="$(psql_admin -tAc "
+    SELECT rolsuper::text || ',' || rolcreatedb::text || ',' || rolcreaterole::text
+        || ',' || rolreplication::text || ',' || rolbypassrls::text
+    FROM pg_roles WHERE rolname = '$role'")"
+  check "$role: no SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS" \
+        "false,false,false,false,false" "$attrs"
+
+  # 2.2 — The role can LOGIN. A least-privilege role that cannot connect is
+  #       not isolation, it is an outage.
+  check "$role: has LOGIN" "true" \
+        "$(psql_admin -tAc "SELECT rolcanlogin::text FROM pg_roles WHERE rolname = '$role'")"
+
+  # 2.3 — PUBLIC holds no CONNECT on this database. This is the revoke that
+  #       stops every OTHER app's role from reaching it.
+  check "$db: PUBLIC has no CONNECT" "f" \
+        "$(psql_admin -tAc "SELECT has_database_privilege('public', '$db', 'CONNECT')::text" | cut -c1)"
+
+  # 2.4 — The role reaches its OWN database. This also establishes that
+  #       authentication works, which is what makes 2.5's refusal
+  #       attributable to privilege rather than to a failed login.
+  own="$(psql -tAqc "SELECT 'reached'" --username "$role" --dbname "$db" 2>/dev/null || echo "REFUSED")"
+  check "$role -> $db: reaches its own database" "reached" "$own"
+
+  # 2.5 — THE ASSERTION. The role must be REFUSED by a database it does not
+  #       own. With a single app in this run the peer is `postgres`, the
+  #       maintenance database whose PUBLIC CONNECT was revoked at the top —
+  #       a genuine peer, and the one database every role knows exists.
+  peer="postgres"
+  for other in $provisioned_dbs; do
+    [ "$other" != "$db" ] && { peer="$other"; break; }
+  done
+
+  if [ "$own" != "reached" ]; then
+    # Without 2.4 a refusal below is ambiguous — it could be an auth failure
+    # rather than a privilege refusal. Refuse to score it either way instead
+    # of recording a pass that was never demonstrated.
+    echo "  FAIL  $role -> $peer: NOT EVALUATED — 2.4 failed, so a refusal here would be ambiguous" >&2
+    failures=$((failures + 1))
+  elif psql -tAqc "SELECT 1" --username "$role" --dbname "$peer" >/dev/null 2>&1; then
+    echo "  FAIL  $role REACHED peer database '$peer' — isolation is NOT in place" >&2
+    failures=$((failures + 1))
+  else
+    echo "  ok    $role: refused by peer database '$peer'"
+  fi
+done
+
+echo
+if [ "$failures" -ne 0 ]; then
+  echo "VERIFICATION FAILED: $failures check(s) did not hold." >&2
+  echo "The databases and roles exist and provisioning is idempotent — but the" >&2
+  echo "isolation they are supposed to provide has NOT been demonstrated." >&2
+  echo "Do not treat this run as complete." >&2
+  exit 1
+fi
+
+echo "isolation verified for:$provisioned_dbs"
