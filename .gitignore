@@ -7,4 +7,8 @@ secrets.env
 # Personal working notes stay out of git (user's global convention).
 worklog.md
 
+# Tool output, regenerated on every run — a per-run stats dump plus its cache.
+# Committing it would put a dozen churning files in front of every real diff.
+.upward/
+
 .DS_Store
