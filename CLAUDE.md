@@ -91,6 +91,9 @@ this; gelp/transigen do not, "tag-gate flip" is deferred/optional).
 - **Full narrative migration log** (Day 1–5, every command + problem/fix):
   `learning/platform-migration-2026-07-24.md` — this is the primary record; read
   it before touching a gate.
+- **Observability stack shape** (data flow, trust boundaries, failure modes):
+  `cluster/observability/docs/architecture.md` — read it before changing anything
+  in that namespace; the install steps are in the sibling `docs/runbook.md`.
 - **OCI security list** (80/443/9000): `docs/security-list.md`.
 - **Cloudflare DNS inventory**: `dns/records.md`.
 

@@ -181,7 +181,7 @@ MP_LABELS='{
 C="cluster=\"${CLUSTER}\""
 # cAdvisor emits a series for the pod cgroup (container="") and for the pause
 # container (container="POD") as well as for each real container. Summing without
-# both filters double-counts — it produced a bogus 890 MB once (pending.md §2.8).
+# both filters double-counts — it produced a bogus 890 MB once (docs/pending.md §2.8).
 CADV="${C}, container!=\"\", container!=\"POD\""
 
 echo "==> querying Grafana Cloud"
@@ -232,7 +232,7 @@ pg_cache="$(scalar "sum(${PGH}) / clamp_min(sum(${PGH}) + sum(${PGR}), 1)")"
 # much data exists, so the absolute volume — the figure that actually
 # characterises the system — stays unpublished. The database names themselves are
 # already public: topology.html shows Postgres serving these apps by name.
-# Decision recorded in pending.md §5.5.
+# Decision recorded in docs/pending.md §5.5.
 #
 # 各 database 在共用 Postgres 裡的**佔比**。bytes 在這裡取得,但下面就丟掉,只有比例
 # 進得了文件。這是把 §5.3 的規則收窄而不是照原文遵守:原文整條排除

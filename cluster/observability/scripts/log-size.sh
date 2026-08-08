@@ -6,7 +6,7 @@
 # name carries the namespace, i.e. the app).
 #
 # NOTE: this MEASURES size only. Bounding it is containerd log rotation
-# (max_size/max_file) — see runbook.md. Monitoring without a rotation cap will
+# (max_size/max_file) — see docs/runbook.md. Monitoring without a rotation cap will
 # still let logs fill the 200GB disk; do both.
 set -euo pipefail
 

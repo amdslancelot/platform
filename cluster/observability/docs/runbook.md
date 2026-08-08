@@ -545,13 +545,13 @@ disk free < 15%, image_store_disk_bytes trend, Postgres connections near max.
 *預期:每條查詢都有資料。對會咬人的幾條設告警:磁碟可用 < 15%、image 佔盤趨勢、
 Postgres 連線數逼近上限。*
 
-> The disk query must match **all three** mountpoints. `docs/runbook-storage.md`
+> The disk query must match **all three** mountpoints. `platform/docs/runbook-storage.md`
 > split `/var/lib/rancher` (containerd) and `/var/lib/containers` (podman) onto
 > their own volumes, so either one filling up is now **invisible in `/`** — which
 > is the exact failure that split was done to make visible. An alert on `/` alone
 > would go green through a full image store.
 >
-> *磁碟查詢必須涵蓋**三個**掛載點。`docs/runbook-storage.md` 已把
+> *磁碟查詢必須涵蓋**三個**掛載點。`platform/docs/runbook-storage.md` 已把
 > `/var/lib/rancher`(containerd)與 `/var/lib/containers`(podman)拆成獨立卷,
 > 所以其中任一塞爆**在 `/` 上完全看不出來** —— 而那正是當初拆卷想讓它可見的失敗
 > 模式。只看 `/` 的告警,會在 image store 爆滿時一路顯示正常。*

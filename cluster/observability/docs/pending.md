@@ -396,11 +396,11 @@ Grafana Cloud 完全不需要這些。*
 
 The argument **for** self-hosting is not cost and not resources — it is that the
 estimated **8–15k active series already reaches Grafana Cloud's free-tier 10k
-ceiling**, so `README.md`'s "10k is enough for this fleet" is optimistic, and the
+ceiling**, so `../README.md`'s "10k is enough for this fleet" is optimistic, and the
 free tier's 14-day retention is short for capacity trends.
 
 *自架的理由不是成本也不是資源,而是估算的 **8–15k active series 已經頂到 Grafana
-Cloud 免費層 10k 的天花板**,所以 `README.md` 寫「10k 對這個機隊夠用」偏樂觀;而且免
+Cloud 免費層 10k 的天花板**,所以 `../README.md` 寫「10k 對這個機隊夠用」偏樂觀;而且免
 費層 14 天保留期對看容量趨勢偏短。*
 
 The cheapest path to deciding: **ship the Grafana Cloud version first, read the
@@ -503,11 +503,11 @@ Two consequences for §2's decision:
    60s 改 5m 只會讓資料變粗,一條 series 都不會少。寫下來是因為這是大家第一個會想到的
    做法。*
 
-`README.md`'s "10k is enough for this fleet" turns out to be **correct after
+`../README.md`'s "10k is enough for this fleet" turns out to be **correct after
 filtering** — the sentence was not wrong, it was just never true of an unfiltered
 kubelet.
 
-*`README.md` 寫「10k 對這個機隊夠用」在**過濾之後是對的** —— 那句話沒錯,只是對未經
+*`../README.md` 寫「10k 對這個機隊夠用」在**過濾之後是對的** —— 那句話沒錯,只是對未經
 過濾的 kubelet 從來就不成立。*
 
 ### 2.8 The collector is the heaviest thing on the node — OPEN
@@ -539,12 +539,12 @@ double-counts. The first reading of this taken during the install said 890 MB fo
 Two things are true at once and both belong in the record: the offload principle
 holds where it was aimed (no TSDB, no query engine, no PVC, fleet-wide CPU ~1.3%
 of two cores), **and** the collector currently outweighs every workload it
-collects from. `README.md`'s "~200 MB total" was an estimate that reality
+collects from. `../README.md`'s "~200 MB total" was an estimate that reality
 overshot by 2x; it has been replaced with the measurement.
 
 *兩件事同時為真,而且都該記下來:offload 原則在它瞄準的地方成立(沒有 TSDB、沒有查詢
 引擎、沒有 PVC,整個機隊的 CPU 約兩顆核心的 1.3%),**而且**採集器目前比它採集的所有
-workload 都重。`README.md` 的「約 200 MB」是估算,實際超出 2 倍,已改成實測值。*
+workload 都重。`../README.md` 的「約 200 MB」是估算,實際超出 2 倍,已改成實測值。*
 
 The cause is §2.7's leftover: the kubelet endpoint's ~46.5k series are parsed into
 label sets *before* the allowlist discards 99.9% of them. Filtering cannot reach
@@ -616,13 +616,13 @@ second account:
 Two consequences worth stating explicitly. First, **this does not touch the A1
 free bucket** — the 1,500 OCPU-hours that louis2 alone already consumes at ~99%
 are untouched by an E2 micro, so nothing here interacts with the scale-out cost
-arithmetic in `docs/scale-out-topology.html`. Second, **AD-1 vs AD-3 is a
+arithmetic in `platform/docs/scale-out-topology.html`. Second, **AD-1 vs AD-3 is a
 feature, not a wrinkle**: a watchdog in a different availability domain from the
 thing it watches is a better watchdog, and intra-region VCN traffic is not
 metered.
 
 *兩個要明講的推論。第一,**這不動用 A1 免費額度** —— louis2 一台就已經吃掉約 99% 的
-1,500 OCPU-hr,E2 micro 完全不碰它,所以本節與 `docs/scale-out-topology.html` 裡的擴充
+1,500 OCPU-hr,E2 micro 完全不碰它,所以本節與 `platform/docs/scale-out-topology.html` 裡的擴充
 成本算式互不相干。第二,**AD-1 對 AD-3 是優點不是麻煩**:監控者跟被監控者在不同
 availability domain 才是好的監控,而且同 region 的 VCN 流量不計費。*
 
@@ -694,13 +694,13 @@ PromQL, and costs nothing extra.
 **Measured 2026-08-02: this fleet has no Postgres backup of any kind.**
 `systemctl list-timers` on louis2 lists only `prune-images.timer` plus OS timers;
 there is no user crontab; and the only backup anywhere in the repo is the
-**one-off, manual** OCI boot-volume backup in `docs/runbook-storage.md` — a
+**one-off, manual** OCI boot-volume backup in `platform/docs/runbook-storage.md` — a
 document which itself states that restoring it is *the only recovery path there
 is*.
 
 ***2026-08-02 實測:這個機隊沒有任何形式的 Postgres 備份。** louis2 上
 `systemctl list-timers` 只有 `prune-images.timer` 與 OS 自帶的 timer;沒有 user
-crontab;整個 repo 裡唯一的備份是 `docs/runbook-storage.md` 裡那次**一次性、手動**的
+crontab;整個 repo 裡唯一的備份是 `platform/docs/runbook-storage.md` 裡那次**一次性、手動**的
 OCI 開機卷備份 —— 而那份文件自己就寫著,還原它是**僅有的復原路徑**。*
 
 The data this protects is small enough that the cost argument disappears
@@ -794,10 +794,10 @@ path.
 - **Not a k3s agent.** kubelet + containerd + flannel is ~300 MB — a third of the
   box — bought in exchange for schedulability it has no use for. It should run
   **podman + Quadlet**, which is the same conclusion the counterpoint section of
-  `docs/scale-out-topology.html` reaches for single-node workloads.
+  `platform/docs/scale-out-topology.html` reaches for single-node workloads.
   ***不要加進 k3s 當 agent。** kubelet + containerd + flannel 約 300 MB,佔掉整台的
   三分之一,換到的只有它根本用不到的「可被排程」。它應該跑 **podman + Quadlet** ——
-  這跟 `docs/scale-out-topology.html` 那節 counterpoint 對單節點負載的結論一致。*
+  這跟 `platform/docs/scale-out-topology.html` 那節 counterpoint 對單節點負載的結論一致。*
 - **Not Postgres, primary or replica.** `PGDATA` is architecture-specific, so
   this is a `pg_dump`/restore, not a file copy; 1 GB is below what the current
   instance is already tuned for; and every app query becomes a cross-node network
@@ -1125,14 +1125,14 @@ Prometheus) with its datasource pointing back at **Grafana Cloud's** Prometheus.
 回 **Grafana Cloud** 的 Prometheus。`allow_embedding` 和 `auth.anonymous` 就變成你自己
 的設定檔,`<iframe>` 因此可用。*
 
-**This does not violate the offload principle** (`README.md`: "a monitor must
+**This does not violate the offload principle** (`../README.md`: "a monitor must
 never compete for the resources it is monitoring"). The heavy half — TSDB
 storage, query execution, 14-day retention — stays rented. What lands on `louis2`
 is only "turn a query result into a picture". The split is storage-and-query
 remote, rendering local, and that is a defensible line rather than a slide back
 toward self-hosting.
 
-***這不違反 offload 原則**(`README.md`:「監控系統絕不該跟它監控的對象搶資源」)。
+***這不違反 offload 原則**(`../README.md`:「監控系統絕不該跟它監控的對象搶資源」)。
 重的那半 —— TSDB 儲存、查詢執行、14 天保留 —— 仍然是租的,落在 `louis2` 上的只有「把
 查詢結果畫成圖」。分界是「儲存與查詢在遠端、渲染在本地」,這是一條站得住腳的線,不是
 偷偷滑回自架。*
@@ -1221,7 +1221,7 @@ Three reasons it beat the Grafana route:
 | | Grafana OSS as UI layer (§5.2) | Static snapshot (chosen) |
 |---|---|---|
 | **Redaction** | anonymous Grafana exposes a **datasource proxy** that forwards arbitrary PromQL — a visitor can ask for `pg_database_size_bytes` or pod names even if no panel shows them | the visitor gets a **file**. There is no query interface. What §5.3 forbids is simply not in the document |
-| **Node cost** | +150–250 MB resident, on the namespace `README.md` just measured as the **heaviest on the node** (397 MB) | one `curl`+`jq` process for ~2 s every 5 min, no resident memory |
+| **Node cost** | +150–250 MB resident, on the namespace `../README.md` just measured as the **heaviest on the node** (397 MB) | one `curl`+`jq` process for ~2 s every 5 min, no resident memory |
 | **New surface** | one more Deployment, one more Ingress, one more public listener to patch | nothing new listens; the existing nginx serves one more static path |
 
 The redaction row is the deciding one. §5.3 required "a separate dashboard

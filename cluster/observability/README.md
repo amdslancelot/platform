@@ -42,13 +42,13 @@ parsed into label sets before the allowlist discards 99.9% of them, and that
 parse-and-discard is what Alloy's memory goes to. `scrape_interval = "5m"` on
 that one job (2026-08-04) cuts how often it happens by 5x. Alloy's 400Mi limit is
 **deliberately left alone until that is re-measured** — lowering a limit on a
-process already near it buys an OOMKill, not a saving. See `pending.md` §2.8.
+process already near it buys an OOMKill, not a saving. See `docs/pending.md` §2.8.
 
 *成因已知且處理中:kubelet 端點那 ~46.5k 條 series 會先被解析成 label set,allowlist
 才丟掉其中 99.9%,而 Alloy 的記憶體就花在這段「解析完再丟」。2026-08-04 為該 job 設
 `scrape_interval = "5m"`,讓這件事少發生 5 倍。Alloy 的 400Mi limit **刻意先不動,等
 重新量測**  —— 對一個已經逼近上限的行程調低 limit,換來的是 OOMKill 不是節省。見
-`pending.md` §2.8。*
+`docs/pending.md` §2.8。*
 
 ## What it monitors / 監控什麼
 
@@ -97,21 +97,37 @@ scripts/public-metrics.sh      host: Grafana Cloud -> allowlisted JSON -> Config
 scripts/public-metrics.{service,timer}          systemd: refresh the public snapshot every 5m
 scripts/install-public-metrics.sh  installs the above + prompts once for the metrics:read token
 dashboards/fleet.json          the fleet dashboard — import into Grafana, see below
-runbook.md                     command-led install + verify (Grafana Cloud, secrets, rotation, prune)
-pending.md                     MUST-READ before applying: pre-flight fixes + the open backend decision
+docs/architecture.md           the SHAPE: data flow, trust boundaries, failure modes
+docs/data-path.md              where each number comes from + what a break costs (counter vs gauge)
+docs/runbook.md                command-led install + verify (Grafana Cloud, secrets, rotation, prune)
+docs/pending.md                MUST-READ before applying: pre-flight fixes + the open backend decision
+docs/glossary.md               the WORDS: series, label, cardinality, temporality, up, WAL, ...
 ```
 
-**Read `pending.md` first.** This branch was authored before the Phase B-1..B-4
+Six documents, six jobs — start with whichever question you have:
+
+*六份文件各有職責,從你的問題挑一份看起:*
+
+| Document | Answers |
+|---|---|
+| `README.md` (this file) | What is monitored, and from which source |
+| `docs/architecture.md` | What shape it is, how the data flows, and what breaks when a piece fails |
+| `docs/data-path.md` | Where a number is born, the five hops it travels, and which metrics lose data when a link breaks |
+| `docs/runbook.md` | How to install it, command by command |
+| `docs/pending.md` | Why each choice was made; what is deferred |
+| `docs/glossary.md` | What a word means — `series`, `label`, `cardinality`, `temporality`, `up`, `WAL` |
+
+**Read `docs/pending.md` first.** This branch was authored before the Phase B-1..B-4
 hardening landed on `main`; three of the runbook's steps fail silently against the
 NetworkPolicies now in place, and two others are stale.
 
-***先讀 `pending.md`。** 本分支撰寫於 Phase B-1..B-4 加固進 `main` 之前;runbook 有三
+***先讀 `docs/pending.md`。** 本分支撰寫於 Phase B-1..B-4 加固進 `main` 之前;runbook 有三
 個步驟會被現行的 NetworkPolicy 靜默擋掉,另有兩處已過時。*
 
-See `runbook.md` for the deploy order and the two things monitoring alone does
+See `docs/runbook.md` for the deploy order and the two things monitoring alone does
 NOT fix: **containerd log rotation** and **periodic image prune**.
 
-*部署順序見 `runbook.md`,以及光靠監控解決不了、必須另外做的兩件事:
+*部署順序見 `docs/runbook.md`,以及光靠監控解決不了、必須另外做的兩件事:
 **containerd log 輪替** 與 **定期 image prune**。*
 
 ## Dashboard / 儀表板
@@ -125,10 +141,10 @@ pick the Prometheus datasource when prompted.
 datasource。*
 
 It has a `cluster` variable driven by `label_values(up, cluster)`, so a second
-cluster (§4.5 in `pending.md`) appears in the picker without editing anything.
+cluster (§4.5 in `docs/pending.md`) appears in the picker without editing anything.
 
 *它有一個由 `label_values(up, cluster)` 驅動的 `cluster` 變數,所以之後若有第二個
-cluster(見 `pending.md` §4.5),不用改任何東西就會出現在選單裡。*
+cluster(見 `docs/pending.md` §4.5),不用改任何東西就會出現在選單裡。*
 
 Do **not** import the community Kubernetes dashboards. Almost all of them depend
 on **kube-state-metrics**, which this stack does not run — every panel would read
@@ -155,13 +171,13 @@ node-exporter,而本 stack 有跑。*
 public internet. It is **not** an embedded Grafana: a timer on the node runs a
 fixed list of queries, reduces them to one JSON document, and publishes it as a
 ConfigMap that `my_website`'s nginx pod mounts. The visitor gets a file, so there
-is no query interface to go around — see `pending.md` §5.5 for why that beat
+is no query interface to go around — see `docs/pending.md` §5.5 for why that beat
 running Grafana OSS, and runbook **Step 6** to install it.
 
 *`lans-h.cc/fleet.html` 把這些指標中刻意挑過的一小部分公開。它**不是**嵌入的 Grafana:
 節點上一個 timer 跑固定的查詢,縮成一份 JSON,以 ConfigMap 發布給 `my_website` 的 nginx
 pod 掛載。訪客拿到的是檔案,所以沒有可繞過的查詢介面 —— 為什麼這勝過跑 Grafana OSS
-見 `pending.md` §5.5,安裝見 runbook **Step 6**。*
+見 `docs/pending.md` §5.5,安裝見 runbook **Step 6**。*
 
 **Before adding a query to it, read the redaction contract** at the top of
 `scripts/public-metrics.sh`. The namespace map there is an allowlist: a namespace

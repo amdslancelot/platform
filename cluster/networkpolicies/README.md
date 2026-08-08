@@ -99,7 +99,7 @@ One namespace at a time, verify, then proceed. Rollback is instant:
 postgres-exporter — added 2026-08-02 with the observability stack. The exporter
 uses a `pg_monitor` role that can read statistics views but not app data, so the
 allowance is a smaller privilege on the same port, not a wider one. See
-`cluster/observability/pending.md` §1.1.
+`cluster/observability/docs/pending.md` §1.1.
 
 *`data.yaml` 另外放行了 `observability` namespace 連 5432,供 postgres-exporter 使用
 —— 2026-08-02 隨 observability stack 加入。exporter 用的是 `pg_monitor` role,讀得到
