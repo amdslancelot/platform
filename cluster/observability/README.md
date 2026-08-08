@@ -126,3 +126,8 @@ running Grafana OSS, and runbook **Step 6** to install it.
 **Before adding a query to it, read the redaction contract** at the top of
 `scripts/public-metrics.sh`. The namespace map there is an allowlist: a namespace
 added to the cluster later does not appear on the public page by default.
+
+There is also a drawing of the whole stack at
+[`lans-h.cc/observability-topology.html`](https://lans-h.cc/observability-topology.html),
+and a write-up of why it is shaped this way at
+[`lans-h.cc/blog/observability-v1-monitoring-in-public/`](https://lans-h.cc/blog/observability-v1-monitoring-in-public/).
